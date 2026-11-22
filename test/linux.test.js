@@ -55,13 +55,15 @@ test('a playing player wins over a paused one', () => {
   assert.equal('link' in pickStatus([playing]), false);
 });
 
-test('the session bus socket file is preferred over abstract sockets', () => {
+test("the session's own bus is used, with the socket file as a fallback for abstract sockets", () => {
   const fs = require('fs');
   const os = require('os');
   const path = require('path');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bus-test-'));
   fs.writeFileSync(path.join(dir, 'bus'), '');
-  assert.equal(busAddress({ XDG_RUNTIME_DIR: dir, DBUS_SESSION_BUS_ADDRESS: 'unix:abstract=/tmp/dbus-x' }), `unix:path=${path.join(dir, 'bus')}`);
-  assert.equal(busAddress({ DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/bus' }), 'unix:path=/run/bus');
+  // A session started with its own bus (like dbus-run-session) keeps it.
+  assert.equal(busAddress({ XDG_RUNTIME_DIR: dir, DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/other-bus' }), 'unix:path=/tmp/other-bus');
+  assert.equal(busAddress({ XDG_RUNTIME_DIR: dir, DBUS_SESSION_BUS_ADDRESS: 'unix:abstract=/tmp/dbus-x,guid=1' }), `unix:path=${path.join(dir, 'bus')}`);
+  assert.equal(busAddress({ XDG_RUNTIME_DIR: dir }), `unix:path=${path.join(dir, 'bus')}`);
   assert.equal(busAddress({}), undefined);
 });

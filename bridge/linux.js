@@ -72,11 +72,14 @@ function pickStatus(statuses) {
 }
 
 function busAddress(env = process.env) {
-  // dbus-native can't open "abstract" sockets, so prefer the session bus
-  // socket file that systemd-based systems keep in XDG_RUNTIME_DIR.
+  // Use the session's own bus. dbus-native can't open "abstract" sockets,
+  // though, so for those (or if none is set) fall back to the socket file
+  // that systemd-based systems keep in XDG_RUNTIME_DIR.
+  const configured = env.DBUS_SESSION_BUS_ADDRESS;
+  if (configured && !configured.includes('abstract=')) return configured;
   const socket = env.XDG_RUNTIME_DIR && path.join(env.XDG_RUNTIME_DIR, 'bus');
   if (socket && fs.existsSync(socket)) return `unix:path=${socket}`;
-  return env.DBUS_SESSION_BUS_ADDRESS;
+  return configured;
 }
 
 // ------------------------------------------------------------------- main
