@@ -112,12 +112,13 @@ ObjC.registerSubclass({
 });
 
 var observer = $.AMRPCObserver.alloc.init;
+// $() is nil here (null would become NSNull): notifications from any sender.
 // 4 = NSNotificationSuspensionBehaviorDeliverImmediately
 $.NSDistributedNotificationCenter.defaultCenter.addObserverSelectorNameObjectSuspensionBehavior(
   observer,
   "musicChanged:",
   "com.apple.Music.playerInfo",
-  null,
+  $(),
   4
 );
 $.NSNotificationCenter.defaultCenter.addObserverSelectorNameObject(

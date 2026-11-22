@@ -44,7 +44,7 @@ async function checkMacNotifications(watcher) {
     '-l',
     'JavaScript',
     '-e',
-    'ObjC.import("Foundation"); $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately("com.apple.Music.playerInfo", null, null, true); ""',
+    'ObjC.import("Foundation"); $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately("com.apple.Music.playerInfo", $(), $(), true); ""',
   ]);
   const [code] = await once(post, 'exit');
   if (code !== 0) fail('could not post a test notification');
