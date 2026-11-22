@@ -1,72 +1,189 @@
-const client = require('discord-rich-presence')('861702238472241162');
-const { app, BrowserWindow } = require('electron');
-require("dotenv").config();
+const { app, Menu, Tray, nativeImage, net } = require('electron');
+const fs = require('fs');
+const path = require('path');
 
-const iTunes = require("./bridge/iTunesBridge.js");
-const iTunesApp = new iTunes();
+const { getPlayerStatus } = require('./bridge/iTunesBridge');
+const DiscordIPC = require('./lib/discord-ipc');
+const { buildActivity, keepTimestamps, parseTrack } = require('./lib/presence');
+const { lookupArtwork } = require('./lib/artwork');
 
-let RPCInterval = 0;
-let state = "Not Opened";
-let currentSong = {};
-let startDate = new Date();
-let lastSong = "";
+const DISCORD_CLIENT_ID = '861702238472241162';
+const POLL_INTERVAL_MS = 1000; // while a song is playing or paused
+const IDLE_POLL_INTERVAL_MS = 5000; // while the player is closed or stopped
+const PLAYER_NAME = process.platform === 'win32' ? 'iTunes' : 'Music';
+const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true };
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 0,
-    height: 0,
-    webPreferences: {
-      nodeIntegration: true
+let tray = null;
+let discord = null;
+let settings = { ...DEFAULT_SETTINGS };
+let status = { state: 'Starting' };
+let activity = null;
+let menuKey = '';
+let pollTimer = null;
+
+// ---------------------------------------------------------------- settings
+
+function settingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function loadSettings() {
+  try {
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(fs.readFileSync(settingsPath(), 'utf8')) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function changeSetting(key, value) {
+  settings[key] = value;
+  try {
+    fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
+    fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
+  } catch (error) {
+    console.warn('Could not save settings:', error.message);
+  }
+  updateMenu();
+  updatePresence();
+}
+
+// ---------------------------------------------------------------- presence
+
+async function updatePresence() {
+  const active = status.state === 'Playing' || status.state === 'Paused';
+  const artwork =
+    active && settings.enabled && settings.showArtwork
+      ? await lookupArtwork(parseTrack(status), {
+          country: (app.getLocaleCountryCode() || 'us').toLowerCase(),
+          fetchImpl: (...args) => net.fetch(...args),
+        })
+      : null;
+
+  const next = settings.enabled ? buildActivity(status, settings, artwork) : null;
+  activity = keepTimestamps(next, activity);
+  discord.setActivity(activity); // only sent to Discord when something changed
+}
+
+async function poll() {
+  try {
+    status = await getPlayerStatus();
+    await updatePresence();
+    updateMenu();
+  } catch (error) {
+    console.error('Update failed:', error);
+  } finally {
+    const active = status.state === 'Playing' || status.state === 'Paused';
+    pollTimer = setTimeout(poll, active ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
+  }
+}
+
+// -------------------------------------------------------------------- tray
+
+function menuText(text, max = 60) {
+  const chars = [...text];
+  const short = chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : text;
+  // Windows treats "&" in menu labels as a keyboard shortcut marker.
+  return process.platform === 'win32' ? short.replace(/&/g, '&&') : short;
+}
+
+function nowPlayingText() {
+  switch (status.state) {
+    case 'Playing':
+    case 'Paused': {
+      const { name, artist } = parseTrack(status);
+      return `${status.state}: ${artist ? `${name} — ${artist}` : name}`;
     }
-  });
-  win.loadFile('index.html');
-}
-
-function setTime(sec) {
-  var t = new Date();
-  t.setSeconds(t.getSeconds() - sec);
-  return t.getTime()
-}
-
-app.whenReady().then(createWindow);
-
-async function update() {
-  currentSong = await iTunesApp.getCurrentSong();
-  if (currentSong) state = await iTunesApp.getState()
-
-  if (currentSong.name && currentSong.name.includes(" - ")) {
-    const split = currentSong.name.split(/\s*\-\s*/);
-    const artist = split.length > 1 ? split[0] : null
-    const songname = split.length > 1 ? split[1] : currentSong.name;
-    currentSong.artist = artist;
-    currentSong.name = songname;
+    case 'Starting':
+      return 'Starting…';
+    case 'Not Running':
+      return `${PLAYER_NAME} isn't open`;
+    case 'Unsupported':
+      return 'Only macOS and Windows are supported';
+    default:
+      return 'Nothing playing';
   }
-
-  let fullTitle = currentSong ? `${currentSong.artist || "Unknown Artist"} - ${currentSong.name}` : "No Song";
-
-  if (state == "Playing" && (fullTitle !== lastSong || !lastSong)) {
-    startDate = new Date();
-    lastSong = `${currentSong.artist || "Unknown Artist"} - ${currentSong.name}`;
-    startDate.setSeconds(new Date().getSeconds() - parseInt(currentSong.elapsed) - 1);
-  }
-
-  startDate = new Date();
-  startDate.setSeconds(new Date().getSeconds() - parseInt(currentSong.elapsed));
-
-  client.updatePresence({
-    state: (state == "Playing") ? `on ${currentSong.album || "Unknown"}` : state,
-    details: `${currentSong.artist || "Unknown"} - ${currentSong.name || "Unknown"}`,
-    startTimestamp: (state == "Playing") ? startDate.getTime() : Date.now(),
-    largeImageKey: 'applemusic',
-    smallImageKey: (state == "Playing") ? "pause" : "play",
-    smallImageText: state,
-    largeImageText: (state == "Playing") ? `${fullTitle}` : "Idling",
-    buttons: [
-      { label: "Search on Apple Music", url: `https://music.apple.com/us/search?term=${encodeURIComponent(currentSong.artist ? fullTitle : currentSong.name)}`},
-      { label: "Search on Spotify", url: `https://open.spotify.com/search/${encodeURIComponent(currentSong.artist ? fullTitle : currentSong.name)}`}
-    ],
-    instance: true,
-  });
 }
 
-RPCInterval = setInterval(update, 1000);
+function updateMenu() {
+  if (!tray) return;
+  const nowPlaying = nowPlayingText();
+  const discordText = discord?.ready ? 'Connected to Discord' : 'Waiting for Discord…';
+
+  // Rebuilding the menu while it's open closes it, so only do it on changes.
+  const key = JSON.stringify([nowPlaying, discordText, settings]);
+  if (key === menuKey) return;
+  menuKey = key;
+
+  tray.setToolTip(`Apple Music Rich Presence\n${nowPlaying}`);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: menuText(nowPlaying), enabled: false },
+      { label: discordText, enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Show on Discord',
+        type: 'checkbox',
+        checked: settings.enabled,
+        click: (item) => changeSetting('enabled', item.checked),
+      },
+      {
+        label: 'Show Progress Bar',
+        type: 'checkbox',
+        checked: settings.showProgress,
+        click: (item) => changeSetting('showProgress', item.checked),
+      },
+      {
+        label: 'Show Album Artwork',
+        type: 'checkbox',
+        checked: settings.showArtwork,
+        click: (item) => changeSetting('showArtwork', item.checked),
+      },
+      {
+        label: 'Open at Login',
+        type: 'checkbox',
+        checked: app.getLoginItemSettings().openAtLogin,
+        click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+      },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() },
+    ])
+  );
+}
+
+function createTray() {
+  const source = nativeImage.createFromPath(path.join(__dirname, 'icons', 'applemusic_64_64.png'));
+  const icon = source.resize({ width: 16, height: 16 });
+  icon.addRepresentation({ scaleFactor: 2, buffer: source.resize({ width: 32, height: 32 }).toPNG() });
+
+  tray = new Tray(icon);
+  // Windows only opens the menu on right-click by default.
+  if (process.platform === 'win32') tray.on('click', () => tray.popUpContextMenu());
+  updateMenu();
+}
+
+// --------------------------------------------------------------------- app
+
+function start() {
+  // This is a menu bar app, so keep it out of the Dock.
+  app.dock?.hide();
+
+  settings = loadSettings();
+  discord = new DiscordIPC(DISCORD_CLIENT_ID);
+  discord.on('ready', updateMenu);
+  discord.on('disconnected', updateMenu);
+  discord.on('warning', (message) => console.warn(message));
+  discord.connect();
+
+  createTray();
+  poll();
+}
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.whenReady().then(start);
+  app.on('before-quit', () => {
+    clearTimeout(pollTimer);
+    discord?.close();
+  });
+}

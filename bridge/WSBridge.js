@@ -6,61 +6,56 @@ var JSON;JSON||(JSON={});
     {"":a})};if(typeof JSON.parse!=="function")JSON.parse=function(a,e){function c(a,d){var g,f,b=a[d];if(b&&typeof b==="object")for(g in b)Object.prototype.hasOwnProperty.call(b,g)&&(f=c(b,g),f!==void 0?b[g]=f:delete b[g]);return e.call(a,d,b)}var d,a=String(a);q.lastIndex=0;q.test(a)&&(a=a.replace(q,function(a){return"\\u"+("0000"+a.charCodeAt(0).toString(16)).slice(-4)}));if(/^[\],:{}\s]*$/.test(a.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g,"@").replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g,
         "]").replace(/(?:^|:|,)(?:\s*\[)+/g,"")))return d=eval("("+a+")"),typeof e==="function"?c({"":d},""):d;throw new SyntaxError("JSON.parse");}})();
 
+// Windows Script Host (JScript) script that reports what iTunes is playing as
+// a single line of JSON.
+// Run with: cscript //Nologo WSBridge.js
 
-var iTunesApp = WScript.createObject("iTunes.Application");
-
-function getPlayerState() {
-  if (!iTunesApp) return "Not Opened";
-  switch (iTunesApp.PlayerState) {
-    case 0:
-      if (iTunesApp.currentTrack && iTunesApp.currentTrack.name)
-        return "Paused";
-
-      return "Stopped";
-    
-    case 1:
-      return "Playing";
-  }
-}
-
-function getCurrentTrack() {
-  var data = {};
+function isITunesRunning() {
   try {
-    var currentTrack = iTunesApp.currentTrack;
-    data = {
-      name: currentTrack.name,
-      artist: currentTrack.artist,
-      album: currentTrack.album,
-      kind: currentTrack.kind,
-      duration: currentTrack.duration,
-      genre: currentTrack.genre,
-      year: currentTrack.year,
-      elapsed: iTunesApp.PlayerPosition,
-      state: getPlayerState()
-    };
+    var wmi = GetObject("winmgmts:\\\\.\\root\\cimv2");
+    return wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name = 'iTunes.exe'").Count > 0;
   } catch (e) {
-    data = {
-      state: getPlayerState()
-    };
+    return true;
   }
-
-  return JSON.stringify(data);
 }
 
-switch (WScript.Arguments.Item(0)) {
-  case "currentTrack":
-  case "currenttrack":
-  case "current":
-    WScript.Echo(getCurrentTrack());
-    break;
-  
-  case "playerState":
-  case "playerstate":
-  case "state":
-    WScript.Echo(getPlayerState());
-    break;
+function getStatus() {
+  // Connecting to iTunes launches it, so check first. Otherwise closing
+  // iTunes would make it reopen a second later.
+  if (!isITunesRunning()) return { state: "Not Running" };
 
-  case "play":
-    iTunesApp.play();
-    break;
+  var itunes = WScript.CreateObject("iTunes.Application");
+  var track = itunes.CurrentTrack;
+  var status = {};
+
+  switch (itunes.PlayerState) {
+    case 1: // playing
+    case 2: // fast forwarding
+    case 3: // rewinding
+      status.state = "Playing";
+      break;
+    default:
+      status.state = track ? "Paused" : "Stopped";
+  }
+  if (status.state === "Stopped") return status;
+
+  try {
+    status.name = track.Name;
+    status.artist = track.Artist;
+    status.album = track.Album;
+    status.duration = track.Duration;
+    status.elapsed = itunes.PlayerPosition;
+  } catch (e) {}
+
+  try {
+    status.streamTitle = itunes.CurrentStreamTitle;
+  } catch (e) {}
+
+  return status;
 }
+
+// Escape non-ASCII characters: cscript writes output in the console's code
+// page, which would otherwise mangle song titles in other languages.
+WScript.Echo(JSON.stringify(getStatus()).replace(/[\u007f-￿]/g, function (c) {
+  return "\\u" + ("0000" + c.charCodeAt(0).toString(16)).slice(-4);
+}));

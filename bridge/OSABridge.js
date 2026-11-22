@@ -1,18 +1,13 @@
-const APP = Application.currentApplication();
-const iTunesApp = Application('Music');
+// JavaScript for Automation (JXA) script that reports what the macOS Music
+// app is playing as a single line of JSON.
+// Run with: osascript -l JavaScript OSABridge.js
 
-APP.includeStandardAdditions = true;
-
-ObjC.import('Foundation');
-
-function getPlayerState() {
-  if (!iTunesApp) return "Not Opened";
-
-  switch (iTunesApp.playerState()) {
+function getPlayerState(music) {
+  switch (music.playerState()) {
     case "playing":
+    case "fast forwarding":
+    case "rewinding":
       return "Playing";
-    case "stopped":
-      return "Stopped";
     case "paused":
       return "Paused";
     default:
@@ -20,42 +15,36 @@ function getPlayerState() {
   }
 }
 
-function getCurrentTrack() {
-  var data = {};
-  try {
-    var currentTrack = iTunesApp.currentTrack;
-    data = {
-      name: currentTrack.name(),
-      artist: currentTrack.artist(),
-      album: currentTrack.album(),
-      kind: currentTrack.kind(),
-      duration: currentTrack.duration(),
-      genre: currentTrack.genre(),
-      year: currentTrack.year(),
-      elapsed: iTunesApp.playerPosition(),
-      state: getPlayerState()
-    };
-  } catch (e) {
-    data = {
-      state: getPlayerState()
-    };
-  }
+function getStatus() {
+  var music = Application("Music");
 
-  return JSON.stringify(data);
+  // Asking a closed app anything launches it, so check first. Otherwise
+  // quitting Music would make it reopen a second later.
+  if (!music.running()) return { state: "Not Running" };
+
+  var status = { state: getPlayerState(music) };
+  if (status.state === "Stopped") return status;
+
+  try {
+    var track = music.currentTrack;
+    status.name = track.name();
+    status.artist = track.artist();
+    status.album = track.album();
+    status.duration = track.duration();
+    status.elapsed = music.playerPosition();
+  } catch (e) {}
+
+  try {
+    status.streamTitle = music.currentStreamTitle();
+  } catch (e) {}
+
+  return status;
 }
 
-function run(argv) {
-  switch(argv[0]) {
-    case "currentTrack":
-    case "currenttrack":
-    case "current":
-      return getCurrentTrack();
-    case "playerState":
-    case "playerstate":
-    case "state":
-      return getPlayerState();
-    case "play":
-      iTunesApp.play();
-      break;
-  }
+function run() {
+  // Escape non-ASCII characters so song titles in any language survive
+  // osascript's output encoding.
+  return JSON.stringify(getStatus()).replace(/[\u007f-￿]/g, function (c) {
+    return "\\u" + ("0000" + c.charCodeAt(0).toString(16)).slice(-4);
+  });
 }
