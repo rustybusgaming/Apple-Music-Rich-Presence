@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { prepareUpdate, assetName, STAGE_NAME } = require('../lib/installer');
+const { prepareUpdate, assetName, STAGE_NAME, LOG_FILE } = require('../lib/installer');
 const { extractZip } = require('../lib/unzip');
 
 const EXECUTABLES = {
@@ -19,6 +19,8 @@ const EXECUTABLES = {
 
 function fail(message) {
   console.error(`::error::${message}`);
+  if (fs.existsSync(LOG_FILE)) console.error(`The install script's log:\n${fs.readFileSync(LOG_FILE, 'utf8')}`);
+  else console.error("The install script didn't write a log");
   process.exit(1);
 }
 
@@ -66,7 +68,8 @@ async function main() {
   );
   // Stands in for the running app: the swap waits until it has quit.
   const running = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)'], { stdio: 'ignore' });
-  ready.install(running.pid);
+  const script = ready.install(running.pid);
+  script.on('exit', (code) => console.log(`The install script finished (exit code ${code})`));
   await waitFor(started, 3 * 60 * 1000);
 
   if (fs.existsSync(marker)) fail('The old version is still installed');
