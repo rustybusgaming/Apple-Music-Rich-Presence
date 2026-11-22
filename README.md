@@ -74,6 +74,12 @@ Download the latest version from [releases](https://github.com/rustybusgaming/Ap
 
   3. The app appears in the system tray (you may need to click the **^** arrow to see it), and your status shows up once iTunes is playing.
 
+* ### Troubleshooting
+
+  * **"Not allowed to read Music"**: macOS is blocking the app from reading Music. Click **Allow Access to Music…** in the app's menu, then turn on **Music** under **AppleMusicRPC**. If you started the app with `npm start`, turn it on for the app you ran that from (e.g. Terminal) instead.
+  * **"Music isn't open" even though it is**: you have an older version that showed this message for the permission problem above. Update to the latest version.
+  * **"Couldn't read Music: …"** or **"Couldn't read iTunes: …"**: something else went wrong. Please open an issue with the message shown.
+
 ## **Running From Source**
 
 You'll need [Node.js](https://nodejs.org) 22.12 or newer.

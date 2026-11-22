@@ -1,4 +1,4 @@
-const { app, Menu, Tray, nativeImage, net } = require('electron');
+const { app, Menu, Tray, nativeImage, net, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -12,6 +12,7 @@ const POLL_INTERVAL_MS = 1000; // while a song is playing or paused
 const IDLE_POLL_INTERVAL_MS = 5000; // while the player is closed or stopped
 const PLAYER_NAME = process.platform === 'win32' ? 'iTunes' : 'Music';
 const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true };
+const AUTOMATION_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
 
 let tray = null;
 let discord = null;
@@ -67,7 +68,9 @@ async function updatePresence() {
 
 async function poll() {
   try {
+    const previousError = status.error;
     status = await getPlayerStatus();
+    if (status.error && status.error !== previousError) console.warn(`Couldn't read ${PLAYER_NAME}:`, status.error);
     await updatePresence();
     updateMenu();
   } catch (error) {
@@ -98,6 +101,8 @@ function nowPlayingText() {
       return 'Starting…';
     case 'Not Running':
       return `${PLAYER_NAME} isn't open`;
+    case 'Error':
+      return status.permission ? `Not allowed to read ${PLAYER_NAME}` : `Couldn't read ${PLAYER_NAME}: ${status.error}`;
     case 'Unsupported':
       return 'Only macOS and Windows are supported';
     default:
@@ -110,8 +115,12 @@ function updateMenu() {
   const nowPlaying = nowPlayingText();
   const discordText = discord?.ready ? 'Connected to Discord' : 'Waiting for Discord…';
 
+  // macOS asks once whether the app may control Music. If that was denied,
+  // offer a shortcut to where it can be turned back on.
+  const needsPermission = status.permission && process.platform === 'darwin';
+
   // Rebuilding the menu while it's open closes it, so only do it on changes.
-  const key = JSON.stringify([nowPlaying, discordText, settings]);
+  const key = JSON.stringify([nowPlaying, discordText, needsPermission, settings]);
   if (key === menuKey) return;
   menuKey = key;
 
@@ -119,6 +128,9 @@ function updateMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: menuText(nowPlaying), enabled: false },
+      ...(needsPermission
+        ? [{ label: `Allow Access to ${PLAYER_NAME}…`, click: () => shell.openExternal(AUTOMATION_SETTINGS_URL) }]
+        : []),
       { label: discordText, enabled: false },
       { type: 'separator' },
       {

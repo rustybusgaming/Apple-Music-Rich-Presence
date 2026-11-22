@@ -118,12 +118,20 @@ jobs:
 
       - run: npm ci
 
+      - name: Check the player script runs on this OS
+        run: node scripts/check-bridge.js
+
       - name: Set the app version
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: npm pkg set version="$VERSION"
 
       - run: npm run ${{ matrix.script }}
+
+      # Without this key macOS silently blocks the app from reading Music.
+      - name: Check the app can ask for access to Music
+        if: runner.os == 'macOS'
+        run: /usr/libexec/PlistBuddy -c 'Print :NSAppleEventsUsageDescription' dist/AppleMusicRPC-darwin-universal/AppleMusicRPC.app/Contents/Info.plist
 
       # Apple Silicon Macs refuse to run unsigned apps. An ad hoc signature
       # is free; users still have to approve the app once (see the README).

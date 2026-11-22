@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the macOS app's Info.plist by `npm run pack:mac`. -->
+
+  <!-- Without this, macOS silently refuses to let the app ask Music what's
+       playing, instead of showing the "wants to control Music" prompt. -->
+  <key>NSAppleEventsUsageDescription</key>
+  <string>AppleMusicRPC reads which song Music is playing so it can show it on your Discord profile.</string>
+
+  <!-- A menu bar app: no Dock icon. -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>

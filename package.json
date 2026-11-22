@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "pack:mac": "electron-packager . AppleMusicRPC --out=dist --platform=darwin --arch=universal --icon=icons/icon.icns --overwrite",
+    "pack:mac": "electron-packager . AppleMusicRPC --out=dist --platform=darwin --arch=universal --icon=icons/icon.icns --extend-info=build/Info.plist --overwrite",
     "pack:win64": "electron-packager . AppleMusicRPC --out=dist --platform=win32 --arch=x64 --icon=icons/icon.ico --overwrite",
     "pack:win-arm64": "electron-packager . AppleMusicRPC --out=dist --platform=win32 --arch=arm64 --icon=icons/icon.ico --overwrite",
     "build": "npm run pack:win64 && npm run pack:win-arm64 && npm run pack:mac"
