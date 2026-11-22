@@ -96,7 +96,8 @@ python scripts/update_logo.py
 
 A GitHub Action (`.github/workflows/release.yml`) builds the app for macOS and Windows on every push. It downloads Apple's latest Apple Music logo first, so every build uses the current icon. To publish a release:
 
-1. Go to the repository's **Actions** tab → **Build and release** → **Run workflow**.
-2. Enter a version number like `1.2.0` and click **Run workflow**.
+1. Optionally, write the release notes in `release-notes/v1.2.0.md` and commit them. Without that file, GitHub writes notes from the commit history.
+2. Go to the repository's **Actions** tab → **Build and release** → **Run workflow**.
+3. Enter a version number like `1.2.0` and click **Run workflow**.
 
-The action creates the `v1.2.0` tag and a release with notes and the three zips attached. Pushing a tag like `v1.2.0` does the same.
+The action creates the `v1.2.0` tag and a release with the notes and the three zips attached. Pushing a tag like `v1.2.0` does the same. Running it again for an existing version updates that release.
