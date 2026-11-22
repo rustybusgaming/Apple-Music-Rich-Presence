@@ -10,12 +10,17 @@
     "pack:mac": "electron-packager . AppleMusicRPC --out=dist --platform=darwin --arch=universal --icon=icons/icon.icns --extend-info=build/Info.plist --overwrite",
     "pack:win64": "electron-packager . AppleMusicRPC --out=dist --platform=win32 --arch=x64 --icon=icons/icon.ico --overwrite",
     "pack:win-arm64": "electron-packager . AppleMusicRPC --out=dist --platform=win32 --arch=arm64 --icon=icons/icon.ico --overwrite",
-    "build": "npm run pack:win64 && npm run pack:win-arm64 && npm run pack:mac"
+    "pack:linux64": "electron-packager . AppleMusicRPC --out=dist --platform=linux --arch=x64 --overwrite",
+    "pack:linux-arm64": "electron-packager . AppleMusicRPC --out=dist --platform=linux --arch=arm64 --overwrite",
+    "build": "npm run pack:win64 && npm run pack:win-arm64 && npm run pack:mac && npm run pack:linux64 && npm run pack:linux-arm64"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@electron/packager": "^20.3.0",
     "electron": "^45.4.1"
+  },
+  "dependencies": {
+    "@homebridge/dbus-native": "^0.7.9"
   }
 }

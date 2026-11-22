@@ -1,5 +1,6 @@
 // Watches the music player by running the platform's script (bridge/mac.js
-// on macOS, bridge/windows.ps1 on Windows) in the background. The script
+// on macOS, bridge/windows.ps1 on Windows, bridge/linux.js on Linux and
+// FreeBSD) in the background. The script
 // prints a line of JSON whenever something changes, and this emits it as a
 // 'status' event:
 //   { state: 'Playing' | 'Paused' | 'Stopped' | 'Not Running' | 'Unsupported',
@@ -12,12 +13,13 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
 
-const PLAYER_NAME = process.platform === 'win32' ? 'Apple Music' : 'Music';
+const PLAYER_NAME = process.platform === 'darwin' ? 'Music' : 'Apple Music';
 
 // Scripts can't be run from inside an asar archive, so use the unpacked copy
 // if the app is ever packaged with asar.
 const BRIDGE_DIR = __dirname.replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked');
 
+// Returns [program, args, env] for the platform's script, or null.
 function commandFor(platform) {
   if (platform === 'darwin') {
     // Pass the script's text rather than its path. macOS may run a downloaded
@@ -30,6 +32,10 @@ function commandFor(platform) {
     const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     const script = path.join(BRIDGE_DIR, 'windows.ps1');
     return [powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script]];
+  }
+  if (platform === 'linux' || platform === 'freebsd') {
+    // Run it with the app's own Electron, acting as plain Node.
+    return [process.execPath, [path.join(BRIDGE_DIR, 'linux.js')], { ELECTRON_RUN_AS_NODE: '1' }];
   }
   return null;
 }
@@ -54,9 +60,9 @@ function isPermissionError(text) {
 function normalizeStatus(status) {
   if (status.state !== 'Error') return status;
   const details = status.details || status.error || '';
-  const player = status.player || PLAYER_NAME;
+  // Permission denials only happen on macOS, where the player is Music.
   if (status.errorNumber === -1743 || isPermissionError(details)) {
-    return { ...status, permission: true, error: `Not allowed to control ${player}`, details };
+    return { ...status, permission: true, error: 'Not allowed to control Music', details };
   }
   return { ...status, error: cleanMessage(details) || 'Unknown error', details };
 }
@@ -66,7 +72,7 @@ function describeExit(code, signal, stderr = '') {
   const output = String(stderr).trim();
   const details = output || `The player script stopped (${signal || `exit code ${code}`})`;
   if (isPermissionError(details)) {
-    return { state: 'Error', permission: true, error: `Not allowed to control ${PLAYER_NAME}`, details };
+    return { state: 'Error', permission: true, error: 'Not allowed to control Music', details };
   }
   const lastLine = output.split('\n').filter((line) => line.trim()).pop();
   return { state: 'Error', error: lastLine ? cleanMessage(lastLine) : details, details };
@@ -101,14 +107,26 @@ class PlayerWatcher extends EventEmitter {
     this.child = null;
   }
 
+  /** Changes the script's settings (environment variables) and restarts it. */
+  setEnv(env) {
+    this.env = { ...this.env, ...env };
+    if (this.stopped || !this.command) return;
+    clearTimeout(this.restartTimer);
+    const child = this.child;
+    this.child = null; // so its exit isn't reported as a crash
+    if (child) child.kill();
+    this.nextDelay = this.restartDelay;
+    this.spawn();
+  }
+
   spawn() {
-    const [file, args] = this.command;
+    const [file, args, commandEnv] = this.command;
     let child;
     try {
       child = spawn(file, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
-        env: { ...process.env, AMRPC_PARENT_PID: String(process.pid), ...this.env },
+        env: { ...process.env, AMRPC_PARENT_PID: String(process.pid), ...commandEnv, ...this.env },
       });
     } catch (error) {
       this.finish(null, describeExit(null, null, error.message));
@@ -157,7 +175,8 @@ class PlayerWatcher extends EventEmitter {
   }
 
   finish(child, status) {
-    if (child && this.child === child) this.child = null;
+    if (child && this.child !== child) return; // replaced by setEnv()
+    this.child = null;
     if (this.stopped) return;
     this.emit('status', status);
     // Restart, waiting longer each time it keeps failing.

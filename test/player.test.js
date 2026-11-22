@@ -119,5 +119,27 @@ test('each platform runs its own long-running script', () => {
   assert.match(powershell, /powershell\.exe$/);
   assert.equal(winArgs[winArgs.indexOf('-File') + 1].split(/[\\/]/).pop(), 'windows.ps1');
 
-  assert.equal(commandFor('linux'), null);
+  for (const platform of ['linux', 'freebsd']) {
+    const [program, args, env] = commandFor(platform);
+    assert.equal(program, process.execPath);
+    assert.equal(args[0].split(/[\\/]/).pop(), 'linux.js');
+    assert.deepEqual(env, { ELECTRON_RUN_AS_NODE: '1' });
+  }
+  assert.equal(commandFor('sunos'), null);
+});
+
+test('setEnv restarts the script with the new settings, without reporting a crash', async (t) => {
+  const watcher = new PlayerWatcher({
+    restartDelay: 10,
+    command: fakePlayer(`console.log(JSON.stringify({ state: 'Stopped', name: process.env.SETTING })); setInterval(() => {}, 1000);`),
+    env: { SETTING: 'before' },
+  });
+  t.after(() => watcher.stop());
+  const statuses = collect(watcher, 2);
+  watcher.start();
+  await once(watcher, 'status');
+  watcher.setEnv({ SETTING: 'after' });
+  const [first, second] = await statuses;
+  assert.equal(first.name, 'before');
+  assert.equal(second.name, 'after'); // no crash report in between
 });

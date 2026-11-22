@@ -103,6 +103,14 @@ jobs:
             download: AppleMusicRPC-Windows-ARM
             os: windows-latest
             script: pack:win-arm64
+          - target: linux-x64
+            download: AppleMusicRPC-Linux-64bit
+            os: ubuntu-latest
+            script: pack:linux64
+          - target: linux-arm64
+            download: AppleMusicRPC-Linux-ARM
+            os: ubuntu-latest
+            script: pack:linux-arm64
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -123,8 +131,15 @@ jobs:
 
       - run: npm ci
 
+      # On Linux the script talks to D-Bus, so give it a session bus.
       - name: Check the player script runs on this OS
-        run: node scripts/check-bridge.js
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            command -v dbus-run-session || { sudo apt-get update -q && sudo apt-get install -y -q dbus; }
+            dbus-run-session -- node scripts/check-bridge.js
+          else
+            node scripts/check-bridge.js
+          fi
 
       - name: Set the app version
         env:
@@ -144,8 +159,8 @@ jobs:
         if: runner.os == 'macOS'
         run: codesign --force --deep --sign - dist/AppleMusicRPC-darwin-universal/AppleMusicRPC.app
 
-      # The Mac zip opens to AppleMusicRPC.app, and the Windows zips to an
-      # AppleMusicRPC folder.
+      # The Mac zip opens to AppleMusicRPC.app, and the Windows and Linux
+      # zips to an AppleMusicRPC folder.
       - name: Zip
         env:
           TARGET: ${{ matrix.target }}
@@ -153,11 +168,22 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
             ditto -c -k --sequesterRsrc --keepParent "dist/AppleMusicRPC-$TARGET/AppleMusicRPC.app" "$DOWNLOAD.zip"
-          else
-            mkdir zip
-            mv "dist/AppleMusicRPC-$TARGET" zip/AppleMusicRPC
-            7z a "$DOWNLOAD.zip" ./zip/AppleMusicRPC
+            exit
           fi
+          mkdir zip
+          mv "dist/AppleMusicRPC-$TARGET" zip/AppleMusicRPC
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a "$DOWNLOAD.zip" ./zip/AppleMusicRPC
+            exit
+          fi
+          # Linux: Electron's sandbox check runs before the app's code and
+          # can stop it starting on newer Ubuntu releases, so start the app
+          # through a launcher that turns the sandbox off. The app shows no
+          # web pages, so it doesn't need it.
+          mv zip/AppleMusicRPC/AppleMusicRPC zip/AppleMusicRPC/AppleMusicRPC-bin
+          printf '#!/bin/sh\nexec "$(dirname "$(readlink -f "$0")")/AppleMusicRPC-bin" --no-sandbox "$@"\n' > zip/AppleMusicRPC/AppleMusicRPC
+          chmod +x zip/AppleMusicRPC/AppleMusicRPC
+          (cd zip && zip -qry "../$DOWNLOAD.zip" AppleMusicRPC)
 
       # Upload the zip as-is. Otherwise GitHub wraps it in another zip, and
       # downloading it from the Actions page gives a zip inside a zip.
