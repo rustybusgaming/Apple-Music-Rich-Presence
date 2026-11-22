@@ -28,13 +28,14 @@ This app bridges [Discord](https://discord.com) and [Apple Music](https://www.ap
   * Shows the song's real album cover
   * Looked up once per song with Apple's public iTunes Search API. You can turn this off from the menu.
   * Without artwork, it shows Apple's current Apple Music logo, fetched live from the App Store so it stays up to date when Apple redesigns it
+  * **Animated covers**: popular albums with a moving cover in Apple Music show it on Discord too. They come from [Animated Album Covers](https://github.com/rustybusgaming/apple-music-animated-covers), which converts the covers of the most-played albums every day. You can turn this off from the menu.
 
 ### **3. Paused Status**
   * Shows that the song is paused, with no timer running
 
 ### **4. Menu Bar / Tray Icon**
   * See what's playing and whether Discord is connected
-  * Turn the status, progress bar or artwork on and off
+  * Turn the status, progress bar, artwork or animated covers on and off
   * Open the app automatically at login
   * Quit the app
 
