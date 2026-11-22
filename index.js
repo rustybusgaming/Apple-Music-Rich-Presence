@@ -187,7 +187,7 @@ async function updatePresence() {
     country: (app.getLocaleCountryCode() || 'us').toLowerCase(),
     fetchImpl: (...args) => net.fetch(...args),
     // A slow lookup doesn't hold up the status; update it once it arrives.
-    onLate: () => updatePresence(),
+    onLate: () => updatePresence().catch((error) => console.error('Update failed:', error)),
   };
   const track = parseTrack(current);
   const wantArtwork = show && settings.showArtwork;

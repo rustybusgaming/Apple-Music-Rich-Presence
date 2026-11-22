@@ -100,6 +100,102 @@ test('a slow lookup returns straight away, then calls onLate when it finishes', 
   assert.ok(cachedNow.imageUrl);
 });
 
+// A fake iTunes Search API: `answer(params)` returns the results for a search.
+function fakeSearch(answer, calls = []) {
+  return async (url) => {
+    const params = Object.fromEntries(new URL(url).searchParams);
+    calls.push(params);
+    return { ok: true, json: async () => ({ results: answer(params) }) };
+  };
+}
+
+const blonde = {
+  trackName: 'Pink + White',
+  artistName: 'Frank Ocean',
+  collectionName: 'Blonde',
+  collectionId: 1146195596,
+  artworkUrl100: 'https://is1.mzstatic.com/blonde/100x100bb.jpg',
+};
+
+test("uses another song from the same album when Apple's search leaves the song out", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch(() => [{ ...blonde, artistName: 'Someone Else', collectionName: 'Covers' }, blonde], calls);
+  const artwork = await lookupArtwork({ name: 'Nights', artist: 'Frank Ocean', album: 'Blonde' }, { fetchImpl });
+  assert.equal(artwork.imageUrl, 'https://is1.mzstatic.com/blonde/512x512bb.jpg');
+  assert.equal(artwork.albumId, '1146195596');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].limit, '25');
+});
+
+test('searches for the album when no song from it comes up', async () => {
+  const calls = [];
+  const album = { artistName: 'Frank Ocean', collectionName: 'Blonde', collectionId: 1146195596, artworkUrl100: blonde.artworkUrl100 };
+  const fetchImpl = fakeSearch((params) => (params.entity === 'album' ? [album] : []), calls);
+  const artwork = await lookupArtwork({ name: 'Solo', artist: 'Frank Ocean', album: 'Blonde' }, { fetchImpl });
+  assert.equal(artwork.imageUrl, 'https://is1.mzstatic.com/blonde/512x512bb.jpg');
+  assert.deepEqual(
+    calls.map((c) => [c.entity, c.term]),
+    [
+      ['song', 'Solo Frank Ocean'],
+      ['album', 'Blonde Frank Ocean'],
+    ]
+  );
+});
+
+test("tries the US store when the computer's country has no match", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch((params) => (params.country === 'us' ? results : []), calls);
+  const artwork = await lookupArtwork({ name: 'Let You Down', artist: 'NF', album: 'Perception' }, { country: 'jp', fetchImpl });
+  assert.equal(artwork.imageUrl, 'https://is1.mzstatic.com/perception/512x512bb.jpg');
+  assert.deepEqual([...new Set(calls.map((c) => c.country))], ['jp', 'us']);
+});
+
+test('a failed lookup is retried during the song, waiting longer each time', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let online = false;
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (!online) throw new Error('offline');
+    return { ok: true, json: async () => ({ results }) };
+  };
+  let late = 0;
+  const options = { country: 'nz', fetchImpl, onLate: () => late++ };
+  const track = { name: 'Let You Down', artist: 'NF', album: 'Perception' };
+
+  assert.equal(await lookupArtwork(track, options), null);
+  t.mock.timers.tick(29_000);
+  assert.equal(await lookupArtwork(track, options), null);
+  assert.equal(calls.length, 1, "doesn't retry before 30 seconds");
+  t.mock.timers.tick(1_200);
+  assert.equal(late, 1, 'asks for an update once the retry is due');
+
+  assert.equal(await lookupArtwork(track, options), null);
+  assert.equal(calls.length, 2);
+  t.mock.timers.tick(30_200);
+  assert.equal(late, 1, 'waits 60 seconds after a second failure');
+  t.mock.timers.tick(30_000);
+  assert.equal(late, 2);
+
+  online = true;
+  const artwork = await lookupArtwork(track, options);
+  assert.equal(artwork.imageUrl, 'https://is1.mzstatic.com/perception/512x512bb.jpg');
+});
+
+test('a song with no match is looked up again an hour later', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const calls = [];
+  const fetchImpl = fakeSearch(() => [], calls);
+  const track = { name: 'Home Recording', artist: 'Me', album: 'Voice Memos' };
+  assert.equal(await lookupArtwork(track, { fetchImpl }), null);
+  const searches = calls.length;
+  assert.equal(await lookupArtwork(track, { fetchImpl }), null);
+  assert.equal(calls.length, searches);
+  t.mock.timers.tick(61 * 60 * 1000);
+  await lookupArtwork(track, { fetchImpl });
+  assert.equal(calls.length, searches * 2);
+});
+
 const coverList = {
   version: 1,
   covers: {
