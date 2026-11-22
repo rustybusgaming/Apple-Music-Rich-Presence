@@ -34,9 +34,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       release: ${{ steps.version.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -67,7 +67,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
@@ -76,7 +76,7 @@ jobs:
           pip install pillow
           python scripts/update_logo.py || echo "::warning::Couldn't fetch the logo, so the build uses the icons in the repository."
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: icons
           path: icons/
@@ -103,15 +103,15 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Use the freshly fetched logo
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: icons
           path: icons
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -141,7 +141,7 @@ jobs:
             7z a "AppleMusicRPC-$TARGET.zip" "./dist/AppleMusicRPC-$TARGET"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: AppleMusicRPC-${{ matrix.target }}
           path: AppleMusicRPC-${{ matrix.target }}.zip
@@ -155,13 +155,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: AppleMusicRPC-*
           path: release
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.prepare.outputs.version }}
           name: v${{ needs.prepare.outputs.version }}
