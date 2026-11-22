@@ -1,4 +1,4 @@
-const { app, clipboard, Menu, Tray, nativeImage, net, shell } = require('electron');
+const { app, clipboard, dialog, Menu, Notification, Tray, nativeImage, net, shell } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -7,11 +7,14 @@ const { PlayerWatcher, PLAYER_NAME } = require('./bridge/player');
 const DiscordIPC = require('./lib/discord-ipc');
 const { buildActivity, keepTimestamps, parseTrack } = require('./lib/presence');
 const { lookupArtwork, lookupAppLogo, lookupAnimatedCovers, findAnimatedCover } = require('./lib/artwork');
+const { checkForUpdate } = require('./lib/updates');
 
 const DISCORD_CLIENT_ID = '861702238472241162';
 const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true, showAnimated: true, includeBrowsers: false };
 const AUTOMATION_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
 const IS_LINUX = process.platform === 'linux' || process.platform === 'freebsd';
+const UPDATE_CHECK_DELAY_MS = 30 * 1000; // after starting
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 // This app shows no web pages, so Chromium's sandbox isn't needed. On Linux it
 // can stop the app from starting at all (newer Ubuntu releases restrict what it
@@ -27,6 +30,9 @@ let status = { state: 'Starting' };
 let activity = null;
 let menuKey = '';
 let watcher = null;
+let availableUpdate = null; // { version, url } when a newer release is out
+let updateTimer = null;
+let updateNotification = null; // kept so its click handler isn't garbage collected
 
 // ---------------------------------------------------------------- settings
 
@@ -42,14 +48,18 @@ function loadSettings() {
   }
 }
 
-function changeSetting(key, value) {
-  settings[key] = value;
+function saveSettings() {
   try {
     fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
     fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2));
   } catch (error) {
     console.warn('Could not save settings:', error.message);
   }
+}
+
+function changeSetting(key, value) {
+  settings[key] = value;
+  saveSettings();
   if (key === 'includeBrowsers') watcher?.setEnv(watcherEnv());
   updateMenu();
   updatePresence();
@@ -89,6 +99,77 @@ function setOpenAtLogin(enabled) {
   } catch (error) {
     console.warn('Could not change Open at Login:', error.message);
   }
+}
+
+// ----------------------------------------------------------------- updates
+
+// Checks GitHub for a newer release. Automatic checks are quiet apart from a
+// menu item and one notification per new version; a manual check always says
+// what it found.
+async function checkForUpdates({ manual = false } = {}) {
+  let result;
+  try {
+    result = await checkForUpdate(app.getVersion(), { fetchImpl: (...args) => net.fetch(...args) });
+  } catch (error) {
+    console.warn("Couldn't check for updates:", error.message);
+    if (manual) await showDialog({ type: 'warning', message: "Couldn't check for updates", detail: error.message });
+    return;
+  }
+
+  availableUpdate = result.newer ? result : null;
+  updateMenu();
+
+  if (manual) {
+    if (!result.newer) {
+      await showDialog({
+        type: 'info',
+        message: "You're up to date",
+        detail: `Apple Music Rich Presence ${app.getVersion()} is the latest version.`,
+      });
+      return;
+    }
+    const { response } = await showDialog({
+      type: 'info',
+      message: `Version ${result.version} is available`,
+      detail: `You have version ${app.getVersion()}. Download the new version?`,
+      buttons: ['Download', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) shell.openExternal(result.url);
+  } else if (result.newer && settings.notifiedVersion !== result.version) {
+    settings.notifiedVersion = result.version;
+    saveSettings();
+    notifyUpdate(result);
+  }
+}
+
+function notifyUpdate(update) {
+  const title = 'Apple Music Rich Presence update';
+  const body = `Version ${update.version} is available. Click to download it.`;
+  // Windows only shows standard notifications for installed apps (with a
+  // Start menu shortcut), which a zip download isn't, so use the tray's own.
+  if (process.platform === 'win32') {
+    tray.displayBalloon({ title, content: body, iconType: 'info' });
+    return;
+  }
+  if (!Notification.isSupported()) return;
+  updateNotification = new Notification({ title, body });
+  updateNotification.on('click', () => shell.openExternal(update.url));
+  updateNotification.show();
+}
+
+function showDialog(options) {
+  // With no windows (and no Dock icon), make sure the dialog comes to the front.
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  return dialog.showMessageBox({ title: 'Apple Music Rich Presence', ...options });
+}
+
+function scheduleUpdateChecks() {
+  updateTimer = setTimeout(function check() {
+    checkForUpdates();
+    updateTimer = setTimeout(check, UPDATE_CHECK_INTERVAL_MS);
+  }, UPDATE_CHECK_DELAY_MS);
 }
 
 // ---------------------------------------------------------------- presence
@@ -181,13 +262,19 @@ function updateMenu() {
   const needsPermission = status.permission && process.platform === 'darwin';
 
   // Rebuilding the menu while it's open closes it, so only do it on changes.
-  const key = JSON.stringify([nowPlaying, discordText, needsPermission, settings]);
+  const key = JSON.stringify([nowPlaying, discordText, needsPermission, settings, availableUpdate]);
   if (key === menuKey) return;
   menuKey = key;
 
   tray.setToolTip(`Apple Music Rich Presence\n${nowPlaying}`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
+      ...(availableUpdate
+        ? [
+            { label: `Update Available: ${availableUpdate.version}…`, click: () => shell.openExternal(availableUpdate.url) },
+            { type: 'separator' },
+          ]
+        : []),
       { label: menuText(nowPlaying), enabled: false },
       ...(needsPermission
         ? [{ label: `Allow Access to ${PLAYER_NAME}…`, click: () => shell.openExternal(AUTOMATION_SETTINGS_URL) }]
@@ -245,6 +332,8 @@ function updateMenu() {
         },
       },
       { type: 'separator' },
+      { label: `Version ${app.getVersion()}`, enabled: false },
+      { label: 'Check for Updates…', click: () => checkForUpdates({ manual: true }) },
       { label: 'Quit', click: () => app.quit() },
     ])
   );
@@ -256,7 +345,10 @@ function createTray() {
   const file = process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png';
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icons', file)));
   // Windows only opens the menu on right-click by default.
-  if (process.platform === 'win32') tray.on('click', () => tray.popUpContextMenu());
+  if (process.platform === 'win32') {
+    tray.on('click', () => tray.popUpContextMenu());
+    tray.on('balloon-click', () => availableUpdate && shell.openExternal(availableUpdate.url));
+  }
   updateMenu();
 }
 
@@ -278,6 +370,8 @@ function start() {
   watcher = new PlayerWatcher({ env: watcherEnv() });
   watcher.on('status', onPlayerStatus);
   watcher.start();
+
+  scheduleUpdateChecks();
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -285,6 +379,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.whenReady().then(start);
   app.on('before-quit', () => {
+    clearTimeout(updateTimer);
     watcher?.stop();
     discord?.close();
   });
