@@ -103,7 +103,7 @@ test('a slow lookup returns straight away, then calls onLate when it finishes', 
 // A fake iTunes Search API: `answer(params)` returns the results for a search.
 function fakeSearch(answer, calls = []) {
   return async (url) => {
-    const params = Object.fromEntries(new URL(url).searchParams);
+    const params = { path: new URL(url).pathname, ...Object.fromEntries(new URL(url).searchParams) };
     calls.push(params);
     return { ok: true, json: async () => ({ results: answer(params) }) };
   };
@@ -148,6 +148,61 @@ test("tries the US store when the computer's country has no match", async () => 
   const artwork = await lookupArtwork({ name: 'Let You Down', artist: 'NF', album: 'Perception' }, { country: 'jp', fetchImpl });
   assert.equal(artwork.imageUrl, 'https://is1.mzstatic.com/perception/512x512bb.jpg');
   assert.deepEqual([...new Set(calls.map((c) => c.country))], ['jp', 'us']);
+});
+
+// Apple's search leaves out explicit albums with no clean version, like IGOR.
+const tyler = { wrapperType: 'artist', artistName: 'Tyler, The Creator', artistId: 420368335 };
+const igor = {
+  wrapperType: 'collection',
+  artistName: 'Tyler, The Creator',
+  artistId: 420368335,
+  collectionName: 'IGOR',
+  collectionId: 1463409338,
+  collectionExplicitness: 'explicit',
+  artworkUrl100: 'https://is1.mzstatic.com/igor/100x100bb.jpg',
+};
+const earfquake = { ...igor, wrapperType: 'track', trackName: 'EARFQUAKE' };
+const chromakopia = { ...igor, collectionName: 'CHROMAKOPIA', collectionId: 1789446415, collectionExplicitness: 'cleaned' };
+
+test("looks through the artist's songs when Apple's search leaves the album out", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return params.entity === 'song' ? [tyler, earfquake] : [];
+    return params.entity === 'album' ? [chromakopia] : [];
+  }, calls);
+  const artwork = await lookupArtwork({ name: 'EARFQUAKE', artist: 'Tyler, The Creator', album: 'IGOR' }, { fetchImpl });
+  assert.equal(artwork.imageUrl, 'https://is1.mzstatic.com/igor/512x512bb.jpg');
+  assert.equal(artwork.albumId, '1463409338');
+  // The artist's ID came with the album search, so no artist search is needed.
+  assert.deepEqual(
+    calls.map((c) => [c.path, c.entity, c.id]),
+    [
+      ['/search', 'song', undefined],
+      ['/search', 'album', undefined],
+      ['/lookup', 'song', '420368335'],
+    ]
+  );
+});
+
+test("finds the artist, then looks through their albums, for a song that isn't among their most popular", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch((params) => {
+    if (params.entity === 'musicArtist') return [{ ...tyler, artistName: 'Tyler Childers', artistId: 1 }, tyler];
+    if (params.path === '/lookup') return params.entity === 'album' ? [tyler, chromakopia, igor] : [tyler];
+    return [];
+  }, calls);
+  const artwork = await lookupArtwork({ name: 'GONE, GONE / THANK YOU', artist: 'Tyler, The Creator', album: 'IGOR' }, { fetchImpl });
+  assert.equal(artwork.albumId, '1463409338');
+  assert.deepEqual(
+    calls.map((c) => [c.path, c.entity]),
+    [
+      ['/search', 'song'],
+      ['/search', 'album'],
+      ['/search', 'musicArtist'],
+      ['/lookup', 'song'],
+      ['/lookup', 'album'],
+    ]
+  );
 });
 
 test('a failed lookup is retried during the song, waiting longer each time', async (t) => {
