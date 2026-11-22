@@ -83,19 +83,24 @@ jobs:
           if-no-files-found: error
 
   build:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.download }}
     needs: prepare
     strategy:
       fail-fast: false
       matrix:
+        # target: what the packager calls it ("win32" is its name for
+        # Windows, 64-bit included). download: the name people see.
         include:
           - target: darwin-universal
+            download: AppleMusicRPC-Mac
             os: macos-latest
             script: pack:mac
           - target: win32-x64
+            download: AppleMusicRPC-Windows-64bit
             os: windows-latest
             script: pack:win64
           - target: win32-arm64
+            download: AppleMusicRPC-Windows-ARM
             os: windows-latest
             script: pack:win-arm64
     runs-on: ${{ matrix.os }}
@@ -139,21 +144,26 @@ jobs:
         if: runner.os == 'macOS'
         run: codesign --force --deep --sign - dist/AppleMusicRPC-darwin-universal/AppleMusicRPC.app
 
+      # The Mac zip opens to AppleMusicRPC.app, and the Windows zips to an
+      # AppleMusicRPC folder.
       - name: Zip
         env:
           TARGET: ${{ matrix.target }}
+          DOWNLOAD: ${{ matrix.download }}
         run: |
           if [ "$RUNNER_OS" = macOS ]; then
-            ditto -c -k --sequesterRsrc --keepParent "dist/AppleMusicRPC-$TARGET/AppleMusicRPC.app" "AppleMusicRPC-$TARGET.zip"
+            ditto -c -k --sequesterRsrc --keepParent "dist/AppleMusicRPC-$TARGET/AppleMusicRPC.app" "$DOWNLOAD.zip"
           else
-            7z a "AppleMusicRPC-$TARGET.zip" "./dist/AppleMusicRPC-$TARGET"
+            mkdir zip
+            mv "dist/AppleMusicRPC-$TARGET" zip/AppleMusicRPC
+            7z a "$DOWNLOAD.zip" ./zip/AppleMusicRPC
           fi
 
       # Upload the zip as-is. Otherwise GitHub wraps it in another zip, and
       # downloading it from the Actions page gives a zip inside a zip.
       - uses: actions/upload-artifact@v7
         with:
-          path: AppleMusicRPC-${{ matrix.target }}.zip
+          path: ${{ matrix.download }}.zip
           archive: false
           if-no-files-found: error
 
@@ -208,6 +218,21 @@ jobs:
             if unzip -Z1 "$file" | grep -qiE '^[^/]+\.zip$'; then
               echo "::error::$file contains another zip"
               exit 1
+            fi
+          done
+
+      # Running again for an existing release adds and replaces downloads but
+      # never removes any, so remove ones that aren't part of this build (for
+      # example after downloads are renamed).
+      - name: Remove old downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          for name in $(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2> /dev/null); do
+            if [ ! -f "release/$name" ]; then
+              echo "Removing $name"
+              gh release delete-asset "v$VERSION" "$name" --repo "$GITHUB_REPOSITORY" --yes
             fi
           done
 
