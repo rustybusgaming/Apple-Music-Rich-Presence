@@ -1,17 +1,18 @@
-const { app, Menu, Tray, nativeImage, net } = require('electron');
+const { app, clipboard, Menu, Tray, nativeImage, net, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
 const { getPlayerStatus } = require('./bridge/iTunesBridge');
 const DiscordIPC = require('./lib/discord-ipc');
 const { buildActivity, keepTimestamps, parseTrack } = require('./lib/presence');
-const { lookupArtwork } = require('./lib/artwork');
+const { lookupArtwork, lookupAppLogo } = require('./lib/artwork');
 
 const DISCORD_CLIENT_ID = '861702238472241162';
 const POLL_INTERVAL_MS = 1000; // while a song is playing or paused
 const IDLE_POLL_INTERVAL_MS = 5000; // while the player is closed or stopped
 const PLAYER_NAME = process.platform === 'win32' ? 'iTunes' : 'Music';
 const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true };
+const AUTOMATION_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
 
 let tray = null;
 let discord = null;
@@ -50,23 +51,26 @@ function changeSetting(key, value) {
 // ---------------------------------------------------------------- presence
 
 async function updatePresence() {
-  const active = status.state === 'Playing' || status.state === 'Paused';
-  const artwork =
-    active && settings.enabled && settings.showArtwork
-      ? await lookupArtwork(parseTrack(status), {
-          country: (app.getLocaleCountryCode() || 'us').toLowerCase(),
-          fetchImpl: (...args) => net.fetch(...args),
-        })
-      : null;
+  const show = settings.enabled && (status.state === 'Playing' || status.state === 'Paused');
+  const lookup = {
+    country: (app.getLocaleCountryCode() || 'us').toLowerCase(),
+    fetchImpl: (...args) => net.fetch(...args),
+  };
+  const [artwork, logo] = await Promise.all([
+    show && settings.showArtwork ? lookupArtwork(parseTrack(status), lookup) : null,
+    show ? lookupAppLogo(lookup) : null,
+  ]);
 
-  const next = settings.enabled ? buildActivity(status, settings, artwork) : null;
+  const next = settings.enabled ? buildActivity(status, { ...settings, logo }, artwork) : null;
   activity = keepTimestamps(next, activity);
   discord.setActivity(activity); // only sent to Discord when something changed
 }
 
 async function poll() {
   try {
+    const previousError = status.error;
     status = await getPlayerStatus();
+    if (status.error && status.error !== previousError) console.warn(`Couldn't read ${PLAYER_NAME}:`, status.error);
     await updatePresence();
     updateMenu();
   } catch (error) {
@@ -97,6 +101,8 @@ function nowPlayingText() {
       return 'Starting…';
     case 'Not Running':
       return `${PLAYER_NAME} isn't open`;
+    case 'Error':
+      return status.permission ? `Not allowed to read ${PLAYER_NAME}` : `Couldn't read ${PLAYER_NAME}: ${status.error}`;
     case 'Unsupported':
       return 'Only macOS and Windows are supported';
     default:
@@ -109,8 +115,12 @@ function updateMenu() {
   const nowPlaying = nowPlayingText();
   const discordText = discord?.ready ? 'Connected to Discord' : 'Waiting for Discord…';
 
+  // macOS asks once whether the app may control Music. If that was denied,
+  // offer a shortcut to where it can be turned back on.
+  const needsPermission = status.permission && process.platform === 'darwin';
+
   // Rebuilding the menu while it's open closes it, so only do it on changes.
-  const key = JSON.stringify([nowPlaying, discordText, settings]);
+  const key = JSON.stringify([nowPlaying, discordText, needsPermission, settings]);
   if (key === menuKey) return;
   menuKey = key;
 
@@ -118,6 +128,12 @@ function updateMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: menuText(nowPlaying), enabled: false },
+      ...(needsPermission
+        ? [{ label: `Allow Access to ${PLAYER_NAME}…`, click: () => shell.openExternal(AUTOMATION_SETTINGS_URL) }]
+        : []),
+      ...(status.details
+        ? [{ label: 'Copy Error Details', click: () => clipboard.writeText(status.details) }]
+        : []),
       { label: discordText, enabled: false },
       { type: 'separator' },
       {
@@ -151,11 +167,10 @@ function updateMenu() {
 }
 
 function createTray() {
-  const source = nativeImage.createFromPath(path.join(__dirname, 'icons', 'applemusic_64_64.png'));
-  const icon = source.resize({ width: 16, height: 16 });
-  icon.addRepresentation({ scaleFactor: 2, buffer: source.resize({ width: 32, height: 32 }).toPNG() });
-
-  tray = new Tray(icon);
+  // On macOS, "Template" images are recolored to suit light and dark menu
+  // bars. Electron loads the @2x versions for high-DPI screens automatically.
+  const file = process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png';
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icons', file)));
   // Windows only opens the menu on right-click by default.
   if (process.platform === 'win32') tray.on('click', () => tray.popUpContextMenu());
   updateMenu();
