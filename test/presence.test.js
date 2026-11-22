@@ -87,3 +87,18 @@ test("Apple's current logo is shown when there's no album artwork", () => {
   assert.equal(buildActivity(song, { logo }, null, NOW).assets.large_image, logo);
   assert.equal(buildActivity(song, { logo }, { imageUrl: 'https://example.com/a.jpg' }, NOW).assets.large_image, 'https://example.com/a.jpg');
 });
+
+test('splits the "Artist — Album" that Apple Music for Windows reports', () => {
+  const dash = String.fromCharCode(0x2014);
+  assert.deepEqual(parseTrack({ name: 'Let You Down', artist: `NF ${dash} Perception`, album: '' }), {
+    name: 'Let You Down',
+    artist: 'NF',
+    album: 'Perception',
+  });
+  assert.deepEqual(
+    parseTrack({ name: 'Aria', artist: `By Johann Sebastian Bach ${dash} Glenn Gould ${dash} Goldberg Variations`, album: '' }),
+    { name: 'Aria', artist: 'Glenn Gould', album: 'Goldberg Variations' }
+  );
+  // A real album means the artist field is left alone.
+  assert.equal(parseTrack({ name: 'X', artist: `A ${dash} B`, album: 'C' }).artist, `A ${dash} B`);
+});
