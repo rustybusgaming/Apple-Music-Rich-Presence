@@ -68,8 +68,11 @@ async function main() {
   );
   // Stands in for the running app: the swap waits until it has quit.
   const running = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)'], { stdio: 'ignore' });
-  const script = ready.install(running.pid);
-  script.on('exit', (code) => console.log(`The install script finished (exit code ${code})`));
+  const script = ready.install(running.pid, { output: 'pipe' });
+  let output = '';
+  script.stdout.on('data', (data) => (output += data));
+  script.stderr.on('data', (data) => (output += data));
+  script.on('exit', (code) => console.log(`The install script finished (exit code ${code})${output ? `:\n${output}` : ''}`));
   await waitFor(started, 3 * 60 * 1000);
 
   if (fs.existsSync(marker)) fail('The old version is still installed');
