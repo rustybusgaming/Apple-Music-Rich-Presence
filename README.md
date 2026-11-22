@@ -11,7 +11,7 @@
 
 ## **Project Overview**
 
-This app bridges [Discord](https://discord.com) and [Apple Music](https://www.apple.com/apple-music/). Apple's Music app (macOS) and iTunes (Windows) don't support [Discord Rich Presence](https://discord.com/rich-presence) out of the box, so this app adds it. Spotify has had full Discord integration for years, so it's about time Apple Music got something efficient too.
+This app bridges [Discord](https://discord.com) and [Apple Music](https://www.apple.com/apple-music/). Apple's Music app on macOS, and the Apple Music app and iTunes on Windows, don't support [Discord Rich Presence](https://discord.com/rich-presence) out of the box, so this app adds it. Spotify has had full Discord integration for years, so it's about time Apple Music got something efficient too.
 
 ### **Project Goals:**
 * Accurate song timing that stays in sync when you skip or seek
@@ -39,8 +39,10 @@ This app bridges [Discord](https://discord.com) and [Apple Music](https://www.ap
   * Quit the app
 
 ### **Good to know**
+  * Works with the **Music** app on macOS, and with the **Apple Music** app (from the Microsoft Store) or **iTunes** on Windows.
+  * Your status updates the moment a song changes, plays or pauses, and the app uses almost no CPU in between.
   * Starting it before Discord is fine. It connects once Discord opens and reconnects if Discord restarts.
-  * It never opens Music or iTunes by itself. Quitting the player clears your status.
+  * It never opens Music, Apple Music or iTunes by itself. Quitting the player clears your status.
   * Internet radio streams show the song that's playing, not just the station name.
 
 ## **App Installation**
@@ -67,13 +69,13 @@ Download the latest version from [releases](https://github.com/rustybusgaming/Ap
 
   2. Run **AppleMusicRPC.exe**. If Windows SmartScreen warns about an unrecognized app, click **More info → Run anyway**.
 
-  3. The app appears in the system tray (you may need to click the **^** arrow to see it), and your status shows up once iTunes is playing.
+  3. The app appears in the system tray (you may need to click the **^** arrow to see it), and your status shows up once Apple Music or iTunes is playing.
 
 * ### Troubleshooting
 
   * **"Not allowed to read Music"**: macOS is blocking the app from reading Music. Click **Allow Access to Music…** in the app's menu, then turn on **Music** under **AppleMusicRPC**. If you started the app with `npm start`, turn it on for the app you ran that from (e.g. Terminal) instead.
   * **"Music isn't open" even though it is**: you have an older version that showed this message for the permission problem above. Update to the latest version.
-  * **"Couldn't read Music: …"** or **"Couldn't read iTunes: …"**: something else went wrong. Click **Copy Error Details** in the app's menu and include that text when you open an issue.
+  * **"Couldn't read Music: …"**, **"Couldn't read Apple Music: …"** or **"Couldn't read iTunes: …"**: something else went wrong. Click **Copy Error Details** in the app's menu and include that text when you open an issue.
 
 ## **Running From Source**
 

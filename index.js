@@ -2,15 +2,12 @@ const { app, clipboard, Menu, Tray, nativeImage, net, shell } = require('electro
 const fs = require('fs');
 const path = require('path');
 
-const { getPlayerStatus } = require('./bridge/iTunesBridge');
+const { PlayerWatcher, PLAYER_NAME } = require('./bridge/player');
 const DiscordIPC = require('./lib/discord-ipc');
 const { buildActivity, keepTimestamps, parseTrack } = require('./lib/presence');
 const { lookupArtwork, lookupAppLogo } = require('./lib/artwork');
 
 const DISCORD_CLIENT_ID = '861702238472241162';
-const POLL_INTERVAL_MS = 1000; // while a song is playing or paused
-const IDLE_POLL_INTERVAL_MS = 5000; // while the player is closed or stopped
-const PLAYER_NAME = process.platform === 'win32' ? 'iTunes' : 'Music';
 const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true };
 const AUTOMATION_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
 
@@ -20,7 +17,7 @@ let settings = { ...DEFAULT_SETTINGS };
 let status = { state: 'Starting' };
 let activity = null;
 let menuKey = '';
-let pollTimer = null;
+let watcher = null;
 
 // ---------------------------------------------------------------- settings
 
@@ -55,6 +52,8 @@ async function updatePresence() {
   const lookup = {
     country: (app.getLocaleCountryCode() || 'us').toLowerCase(),
     fetchImpl: (...args) => net.fetch(...args),
+    // A slow lookup doesn't hold up the status; update it once it arrives.
+    onLate: () => updatePresence(),
   };
   const [artwork, logo] = await Promise.all([
     show && settings.showArtwork ? lookupArtwork(parseTrack(status), lookup) : null,
@@ -66,18 +65,15 @@ async function updatePresence() {
   discord.setActivity(activity); // only sent to Discord when something changed
 }
 
-async function poll() {
+// Called by the player watcher whenever what's playing changes.
+async function onPlayerStatus(next) {
+  if (next.error && next.error !== status.error) console.warn(`Couldn't read ${next.player || PLAYER_NAME}:`, next.details || next.error);
+  status = next;
+  updateMenu();
   try {
-    const previousError = status.error;
-    status = await getPlayerStatus();
-    if (status.error && status.error !== previousError) console.warn(`Couldn't read ${PLAYER_NAME}:`, status.error);
     await updatePresence();
-    updateMenu();
   } catch (error) {
     console.error('Update failed:', error);
-  } finally {
-    const active = status.state === 'Playing' || status.state === 'Paused';
-    pollTimer = setTimeout(poll, active ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
   }
 }
 
@@ -100,9 +96,11 @@ function nowPlayingText() {
     case 'Starting':
       return 'Starting…';
     case 'Not Running':
-      return `${PLAYER_NAME} isn't open`;
-    case 'Error':
-      return status.permission ? `Not allowed to read ${PLAYER_NAME}` : `Couldn't read ${PLAYER_NAME}: ${status.error}`;
+      return process.platform === 'win32' ? "Apple Music and iTunes aren't open" : "Music isn't open";
+    case 'Error': {
+      const player = status.player || PLAYER_NAME;
+      return status.permission ? `Not allowed to read ${player}` : `Couldn't read ${player}: ${status.error}`;
+    }
     case 'Unsupported':
       return 'Only macOS and Windows are supported';
     default:
@@ -190,7 +188,10 @@ function start() {
   discord.connect();
 
   createTray();
-  poll();
+
+  watcher = new PlayerWatcher();
+  watcher.on('status', onPlayerStatus);
+  watcher.start();
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -198,7 +199,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.whenReady().then(start);
   app.on('before-quit', () => {
-    clearTimeout(pollTimer);
+    watcher?.stop();
     discord?.close();
   });
 }

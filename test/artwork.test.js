@@ -82,3 +82,19 @@ test('lookupAppLogo returns null when Apple is unreachable', async () => {
   };
   assert.equal(await lookupAppLogo({ country: 'fr', fetchImpl }), null);
 });
+
+test('a slow lookup returns straight away, then calls onLate when it finishes', async () => {
+  const fetchImpl = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    return { ok: true, json: async () => ({ results }) };
+  };
+  let late = false;
+  const lateCalled = new Promise((resolve) => {
+    const result = lookupArtwork({ name: 'Let You Down', artist: 'NF', album: 'Slow' }, { fetchImpl, wait: 10, onLate: () => resolve((late = true)) });
+    result.then((value) => assert.equal(value, null));
+  });
+  await lateCalled;
+  assert.equal(late, true);
+  const cachedNow = await lookupArtwork({ name: 'Let You Down', artist: 'NF', album: 'Slow' }, { fetchImpl, wait: 10 });
+  assert.ok(cachedNow.imageUrl);
+});
