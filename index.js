@@ -8,9 +8,18 @@ const DiscordIPC = require('./lib/discord-ipc');
 const { buildActivity, keepTimestamps, parseTrack } = require('./lib/presence');
 const { lookupArtwork, lookupAppLogo, lookupAnimatedCovers, findAnimatedCover } = require('./lib/artwork');
 const { checkForUpdate } = require('./lib/updates');
+const { prepareUpdate, assetName } = require('./lib/installer');
 
 const DISCORD_CLIENT_ID = '861702238472241162';
-const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true, showAnimated: true, includeBrowsers: false };
+const DEFAULT_SETTINGS = {
+  enabled: true,
+  showProgress: true,
+  showArtwork: true,
+  showAnimated: true,
+  includeBrowsers: false,
+  autoUpdate: true,
+};
+const RELEASE_PAGE = (version) => `https://github.com/rustybusgaming/Apple-Music-Rich-Presence/releases/tag/v${version}`;
 const AUTOMATION_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
 const IS_LINUX = process.platform === 'linux' || process.platform === 'freebsd';
 const UPDATE_CHECK_DELAY_MS = 30 * 1000; // after starting
@@ -30,7 +39,8 @@ let status = { state: 'Starting' };
 let activity = null;
 let menuKey = '';
 let watcher = null;
-let availableUpdate = null; // { version, url } when a newer release is out
+let availableUpdate = null; // { version, url, assets } when a newer release is out
+let updateProgress = null; // while installing it: 0 to 1 as it downloads, then 'installing'
 let updateTimer = null;
 let updateNotification = null; // kept so its click handler isn't garbage collected
 
@@ -103,10 +113,18 @@ function setOpenAtLogin(enabled) {
 
 // ----------------------------------------------------------------- updates
 
-// Checks GitHub for a newer release. Automatic checks are quiet apart from a
-// menu item and one notification per new version; a manual check always says
-// what it found.
+// Whether this copy of the app can install updates by itself: the downloads
+// on GitHub, not when it's run from source.
+function canInstallUpdates() {
+  return app.isPackaged && Boolean(assetName(process.platform, process.arch));
+}
+
+// Checks GitHub for a newer release and, if Install Updates Automatically is
+// on, installs it. Otherwise automatic checks are quiet apart from a menu item
+// and one notification per new version; a manual check always says what it
+// found, and installs the update.
 async function checkForUpdates({ manual = false } = {}) {
+  if (updateProgress !== null) return; // already installing one
   let result;
   try {
     result = await checkForUpdate(app.getVersion(), { fetchImpl: (...args) => net.fetch(...args) });
@@ -119,15 +137,24 @@ async function checkForUpdates({ manual = false } = {}) {
   availableUpdate = result.newer ? result : null;
   updateMenu();
 
-  if (manual) {
-    if (!result.newer) {
+  if (!result.newer) {
+    if (manual) {
       await showDialog({
         type: 'info',
         message: "You're up to date",
         detail: `Apple Music Rich Presence ${app.getVersion()} is the latest version.`,
       });
-      return;
     }
+    return;
+  }
+  // Don't keep retrying an update that didn't install; the menu still offers it.
+  const automatic = settings.autoUpdate && settings.failedUpdate !== result.version;
+  if (canInstallUpdates() && (manual || automatic)) {
+    await installUpdate({ manual });
+    return;
+  }
+
+  if (manual) {
     const { response } = await showDialog({
       type: 'info',
       message: `Version ${result.version} is available`,
@@ -137,16 +164,80 @@ async function checkForUpdates({ manual = false } = {}) {
       cancelId: 1,
     });
     if (response === 0) shell.openExternal(result.url);
-  } else if (result.newer && settings.notifiedVersion !== result.version) {
+  } else if (settings.notifiedVersion !== result.version) {
     settings.notifiedVersion = result.version;
     saveSettings();
-    notifyUpdate(result);
+    notify(`Version ${result.version} is available. Click to download it.`, result.url);
   }
 }
 
-function notifyUpdate(update) {
-  const title = 'Apple Music Rich Presence update';
-  const body = `Version ${update.version} is available. Click to download it.`;
+// Downloads the available update, then quits so it can be swapped in; the
+// new version starts by itself.
+async function installUpdate({ manual = false } = {}) {
+  const update = availableUpdate;
+  if (!update || updateProgress !== null) return;
+  updateProgress = 0;
+  updateMenu();
+  if (manual) notify(`Downloading version ${update.version}. The app restarts by itself when it's ready.`, update.url);
+  try {
+    const ready = await prepareUpdate(update, {
+      fetchImpl: (...args) => net.fetch(...args),
+      onProgress: (fraction) => {
+        // The menu shows tens of percent (rebuilding it closes it if open).
+        const shown = Math.floor(fraction * 10) / 10;
+        if (shown !== updateProgress) {
+          updateProgress = shown;
+          updateMenu();
+        }
+      },
+    });
+    updateProgress = 'installing';
+    updateMenu();
+    settings.installingVersion = update.version;
+    saveSettings();
+    ready.install(process.pid);
+    app.quit();
+  } catch (error) {
+    updateProgress = null;
+    updateMenu();
+    console.warn(`Couldn't install version ${update.version}:`, error.message);
+    if (manual) {
+      const { response } = await showDialog({
+        type: 'warning',
+        message: `Couldn't install version ${update.version}`,
+        detail: `${error.message}. You can download it from GitHub instead.`,
+        buttons: ['Download', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response === 0) shell.openExternal(update.url);
+    } else if (settings.notifiedVersion !== update.version) {
+      settings.notifiedVersion = update.version;
+      saveSettings();
+      notify(`Version ${update.version} is available, but couldn't be installed by itself. Click to download it.`, update.url);
+    }
+  }
+}
+
+// After an update: say it worked, or remember that it didn't.
+function reportUpdate() {
+  const version = settings.installingVersion;
+  if (!version) return;
+  delete settings.installingVersion;
+  if (version === app.getVersion()) {
+    notify(`Updated to version ${version}. Click to see what's new.`, RELEASE_PAGE(version));
+  } else {
+    settings.failedUpdate = version;
+    notify(`Version ${version} couldn't be installed by itself. Click to download it.`, RELEASE_PAGE(version));
+  }
+  saveSettings();
+}
+
+let notificationUrl = null; // what clicking the latest notification opens
+
+function notify(body, url) {
+  const title = 'Apple Music Rich Presence';
+  notificationUrl = url;
   // Windows only shows standard notifications for installed apps (with a
   // Start menu shortcut), which a zip download isn't, so use the tray's own.
   if (process.platform === 'win32') {
@@ -155,8 +246,18 @@ function notifyUpdate(update) {
   }
   if (!Notification.isSupported()) return;
   updateNotification = new Notification({ title, body });
-  updateNotification.on('click', () => shell.openExternal(update.url));
+  updateNotification.on('click', () => shell.openExternal(url));
   updateNotification.show();
+}
+
+function updateMenuItem() {
+  const { version } = availableUpdate;
+  if (updateProgress === 'installing') return { label: `Installing Version ${version}…`, enabled: false };
+  if (updateProgress !== null) {
+    return { label: `Downloading Version ${version}… ${Math.round(updateProgress * 100)}%`, enabled: false };
+  }
+  if (canInstallUpdates()) return { label: `Install Update ${version}`, click: () => installUpdate({ manual: true }) };
+  return { label: `Update Available: ${version}…`, click: () => shell.openExternal(availableUpdate.url) };
 }
 
 function showDialog(options) {
@@ -262,19 +363,14 @@ function updateMenu() {
   const needsPermission = status.permission && process.platform === 'darwin';
 
   // Rebuilding the menu while it's open closes it, so only do it on changes.
-  const key = JSON.stringify([nowPlaying, discordText, needsPermission, settings, availableUpdate]);
+  const key = JSON.stringify([nowPlaying, discordText, needsPermission, settings, availableUpdate, updateProgress]);
   if (key === menuKey) return;
   menuKey = key;
 
   tray.setToolTip(`Apple Music Rich Presence\n${nowPlaying}`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      ...(availableUpdate
-        ? [
-            { label: `Update Available: ${availableUpdate.version}…`, click: () => shell.openExternal(availableUpdate.url) },
-            { type: 'separator' },
-          ]
-        : []),
+      ...(availableUpdate ? [updateMenuItem(), { type: 'separator' }] : []),
       { label: menuText(nowPlaying), enabled: false },
       ...(needsPermission
         ? [{ label: `Allow Access to ${PLAYER_NAME}…`, click: () => shell.openExternal(AUTOMATION_SETTINGS_URL) }]
@@ -333,7 +429,17 @@ function updateMenu() {
       },
       { type: 'separator' },
       { label: `Version ${app.getVersion()}`, enabled: false },
-      { label: 'Check for Updates…', click: () => checkForUpdates({ manual: true }) },
+      { label: 'Check for Updates…', enabled: updateProgress === null, click: () => checkForUpdates({ manual: true }) },
+      ...(canInstallUpdates()
+        ? [
+            {
+              label: 'Install Updates Automatically',
+              type: 'checkbox',
+              checked: settings.autoUpdate,
+              click: (item) => changeSetting('autoUpdate', item.checked),
+            },
+          ]
+        : []),
       { label: 'Quit', click: () => app.quit() },
     ])
   );
@@ -347,7 +453,7 @@ function createTray() {
   // Windows only opens the menu on right-click by default.
   if (process.platform === 'win32') {
     tray.on('click', () => tray.popUpContextMenu());
-    tray.on('balloon-click', () => availableUpdate && shell.openExternal(availableUpdate.url));
+    tray.on('balloon-click', () => notificationUrl && shell.openExternal(notificationUrl));
   }
   updateMenu();
 }
@@ -366,6 +472,7 @@ function start() {
   discord.connect();
 
   createTray();
+  reportUpdate();
 
   watcher = new PlayerWatcher({ env: watcherEnv() });
   watcher.on('status', onPlayerStatus);

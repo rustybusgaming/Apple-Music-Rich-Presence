@@ -25,7 +25,7 @@ test('a newer release on GitHub is reported with its page', async () => {
   const result = await checkForUpdate('1.3.0', {
     fetchImpl: release({ tag_name: 'v1.4.0', html_url: 'https://github.com/x/y/releases/tag/v1.4.0' }, 200, seen),
   });
-  assert.deepEqual(result, { version: '1.4.0', url: 'https://github.com/x/y/releases/tag/v1.4.0', newer: true });
+  assert.deepEqual(result, { version: '1.4.0', url: 'https://github.com/x/y/releases/tag/v1.4.0', newer: true, assets: [] });
   assert.match(seen.url, /api\.github\.com\/repos\/rustybusgaming\/Apple-Music-Rich-Presence\/releases\/latest$/);
   assert.equal(seen.options.headers.Accept, 'application/vnd.github+json');
 });
@@ -38,4 +38,28 @@ test('being on the latest version is not an update', async () => {
 test('GitHub errors and odd releases are reported, not ignored', async () => {
   await assert.rejects(checkForUpdate('1.3.0', { fetchImpl: release({}, 403) }), /GitHub returned 403/);
   await assert.rejects(checkForUpdate('1.3.0', { fetchImpl: release({ tag_name: 'latest' }) }), /no version number/);
+});
+
+test("lists the release's downloads with their size and digest", async () => {
+  const result = await checkForUpdate('1.3.0', {
+    fetchImpl: release({
+      tag_name: 'v1.4.0',
+      assets: [
+        {
+          name: 'AppleMusicRPC-Mac.zip',
+          browser_download_url: 'https://github.com/x/y/releases/download/v1.4.0/AppleMusicRPC-Mac.zip',
+          size: 1234,
+          digest: 'sha256:abc',
+        },
+      ],
+    }),
+  });
+  assert.deepEqual(result.assets, [
+    {
+      name: 'AppleMusicRPC-Mac.zip',
+      url: 'https://github.com/x/y/releases/download/v1.4.0/AppleMusicRPC-Mac.zip',
+      size: 1234,
+      digest: 'sha256:abc',
+    },
+  ]);
 });

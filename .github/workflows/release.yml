@@ -185,6 +185,13 @@ jobs:
           chmod +x zip/AppleMusicRPC/AppleMusicRPC
           (cd zip && zip -qry "../$DOWNLOAD.zip" AppleMusicRPC)
 
+      # Install the zip over a copy of itself with the app's own updater, the
+      # way the app installs updates, to check that works on this system.
+      - name: Check the app can install this as an update
+        env:
+          DOWNLOAD: ${{ matrix.download }}
+        run: node scripts/check-update.js "$DOWNLOAD.zip"
+
       # Upload the zip as-is. Otherwise GitHub wraps it in another zip, and
       # downloading it from the Actions page gives a zip inside a zip.
       - uses: actions/upload-artifact@v7
