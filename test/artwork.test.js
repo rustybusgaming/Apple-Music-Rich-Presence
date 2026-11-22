@@ -48,10 +48,7 @@ test('lookupArtwork returns large artwork and caches the result', async () => {
   const fetchImpl = fakeFetch({ results }, calls);
 
   const artwork = await lookupArtwork(track, { fetchImpl });
-  assert.deepEqual(artwork, {
-    imageUrl: 'https://is1.mzstatic.com/perception/512x512bb.jpg',
-    trackUrl: 'https://music.apple.com/us/album/perception?i=2',
-  });
+  assert.deepEqual(artwork, { imageUrl: 'https://is1.mzstatic.com/perception/512x512bb.jpg' });
   assert.match(calls[0], /^https:\/\/itunes\.apple\.com\/search\?term=Let\+You\+Down\+NF&/);
 
   await lookupArtwork(track, { fetchImpl });

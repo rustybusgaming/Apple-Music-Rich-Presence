@@ -32,12 +32,7 @@ This app bridges [Discord](https://discord.com) and [Apple Music](https://www.ap
 ### **3. Paused Status**
   * Shows that the song is paused, with no timer running
 
-### **4. Buttons**
-  * **Listen on Apple Music**: opens the song itself when it can be found, or an Apple Music search when it can't
-  * **Search on Spotify**
-  * Note: Discord doesn't show your own buttons to you. Your friends see them.
-
-### **5. Menu Bar / Tray Icon**
+### **4. Menu Bar / Tray Icon**
   * See what's playing and whether Discord is connected
   * Turn the status, progress bar or artwork on and off
   * Open the app automatically at login

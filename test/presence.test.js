@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildActivity, keepTimestamps, parseTrack, fitText, searchUrl } = require('../lib/presence');
+const { buildActivity, keepTimestamps, parseTrack, fitText } = require('../lib/presence');
 
 const NOW = 1_700_000_000_000;
 const song = { state: 'Playing', name: 'Let You Down', artist: 'NF', album: 'Perception', duration: 212, elapsed: 38.4 };
@@ -41,11 +41,7 @@ test('a playing song shows as Listening with a progress bar', () => {
   assert.equal(activity.assets.large_text, 'Perception');
   assert.equal(activity.assets.small_image, 'pause');
   assert.deepEqual(activity.timestamps, { start: NOW - 38400, end: NOW - 38400 + 212000 });
-  assert.deepEqual(
-    activity.buttons.map((b) => b.label),
-    ['Search on Apple Music', 'Search on Spotify']
-  );
-  assert.equal(activity.buttons[1].url, 'https://open.spotify.com/search/Let%20You%20Down%20NF');
+  assert.equal(activity.buttons, undefined);
 });
 
 test('progress bar can be turned off', () => {
@@ -60,18 +56,16 @@ test('a paused song has no running timer', () => {
   assert.equal(activity.timestamps, undefined);
 });
 
-test('artwork and a direct song link are used when found', () => {
-  const artwork = { imageUrl: 'https://example.com/a.jpg', trackUrl: 'https://music.apple.com/us/album/x?i=1' };
+test('album artwork is used when found', () => {
+  const artwork = { imageUrl: 'https://example.com/a.jpg' };
   const activity = buildActivity(song, {}, artwork, NOW);
   assert.equal(activity.assets.large_image, artwork.imageUrl);
-  assert.deepEqual(activity.buttons[0], { label: 'Listen on Apple Music', url: artwork.trackUrl });
 });
 
 test('text is kept within Discord limits', () => {
   assert.equal(fitText('X'), 'X\u200b');
   assert.equal([...fitText('a'.repeat(300))].length, 128);
   assert.equal([...fitText('🎵'.repeat(200))].length, 128);
-  assert.ok(searchUrl('https://open.spotify.com/search/', '音楽'.repeat(200)).length <= 512);
 });
 
 test('keepTimestamps ignores small drift but notices seeks and song changes', () => {
