@@ -149,10 +149,12 @@ jobs:
             7z a "AppleMusicRPC-$TARGET.zip" "./dist/AppleMusicRPC-$TARGET"
           fi
 
+      # Upload the zip as-is. Otherwise GitHub wraps it in another zip, and
+      # downloading it from the Actions page gives a zip inside a zip.
       - uses: actions/upload-artifact@v7
         with:
-          name: AppleMusicRPC-${{ matrix.target }}
           path: AppleMusicRPC-${{ matrix.target }}.zip
+          archive: false
           if-no-files-found: error
 
   release:
@@ -163,11 +165,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      # skip-decompress keeps the app zips as they are; otherwise this step
+      # would unpack them because they're zip files.
       - uses: actions/download-artifact@v8
         with:
           pattern: AppleMusicRPC-*
           path: release
           merge-multiple: true
+          skip-decompress: true
+
+      - name: Check each download opens straight to the app
+        run: |
+          for file in release/*.zip; do
+            echo "$file contains:"
+            unzip -Z1 "$file" | cut -d/ -f1 | sort -u | sed 's/^/  /'
+            if unzip -Z1 "$file" | grep -qiE '^[^/]+\.zip$'; then
+              echo "::error::$file contains another zip"
+              exit 1
+            fi
+          done
 
       - uses: softprops/action-gh-release@v3
         with:
