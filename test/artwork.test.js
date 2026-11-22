@@ -205,6 +205,30 @@ test("finds the artist, then looks through their albums, for a song that isn't a
   );
 });
 
+test("a collaboration is looked up under its first artist", async () => {
+  const calls = [];
+  const dave = { wrapperType: 'artist', artistName: 'Dave', artistId: 1 };
+  const sprinter = {
+    wrapperType: 'track',
+    artistName: 'Dave & Central Cee',
+    trackName: 'Sprinter',
+    collectionName: 'Sprinter - Single',
+    collectionId: 1689467155,
+    artworkUrl100: 'https://is1.mzstatic.com/sprinter/100x100bb.jpg',
+  };
+  const fetchImpl = fakeSearch((params) => {
+    if (params.entity === 'musicArtist') return params.term === 'Dave' ? [dave] : [];
+    if (params.path === '/lookup') return params.id === '1' && params.entity === 'song' ? [dave, sprinter] : [];
+    return [];
+  }, calls);
+  const artwork = await lookupArtwork({ name: 'Sprinter', artist: 'Dave & Central Cee', album: 'Sprinter - Single' }, { fetchImpl });
+  assert.equal(artwork.albumId, '1689467155');
+  assert.deepEqual(
+    calls.filter((c) => c.entity === 'musicArtist').map((c) => c.term),
+    ['Dave & Central Cee', 'Dave']
+  );
+});
+
 test('a failed lookup is retried during the song, waiting longer each time', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   let online = false;
