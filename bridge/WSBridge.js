@@ -56,6 +56,6 @@ function getStatus() {
 
 // Escape non-ASCII characters: cscript writes output in the console's code
 // page, which would otherwise mangle song titles in other languages.
-WScript.Echo(JSON.stringify(getStatus()).replace(/[\u007f-￿]/g, function (c) {
+WScript.Echo(JSON.stringify(getStatus()).replace(/[\u007f-\uffff]/g, function (c) {
   return "\\u" + ("0000" + c.charCodeAt(0).toString(16)).slice(-4);
 }));

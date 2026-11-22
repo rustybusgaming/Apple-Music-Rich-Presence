@@ -78,7 +78,7 @@ Download the latest version from [releases](https://github.com/rustybusgaming/Ap
 
   * **"Not allowed to read Music"**: macOS is blocking the app from reading Music. Click **Allow Access to Music…** in the app's menu, then turn on **Music** under **AppleMusicRPC**. If you started the app with `npm start`, turn it on for the app you ran that from (e.g. Terminal) instead.
   * **"Music isn't open" even though it is**: you have an older version that showed this message for the permission problem above. Update to the latest version.
-  * **"Couldn't read Music: …"** or **"Couldn't read iTunes: …"**: something else went wrong. Please open an issue with the message shown.
+  * **"Couldn't read Music: …"** or **"Couldn't read iTunes: …"**: something else went wrong. Click **Copy Error Details** in the app's menu and include that text when you open an issue.
 
 ## **Running From Source**
 

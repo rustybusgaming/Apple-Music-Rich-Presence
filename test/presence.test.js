@@ -68,7 +68,7 @@ test('artwork and a direct song link are used when found', () => {
 });
 
 test('text is kept within Discord limits', () => {
-  assert.equal(fitText('X'), 'X​');
+  assert.equal(fitText('X'), 'X\u200b');
   assert.equal([...fitText('a'.repeat(300))].length, 128);
   assert.equal([...fitText('🎵'.repeat(200))].length, 128);
   assert.ok(searchUrl('https://open.spotify.com/search/', '音楽'.repeat(200)).length <= 512);

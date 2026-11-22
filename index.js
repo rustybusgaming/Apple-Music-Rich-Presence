@@ -1,4 +1,4 @@
-const { app, Menu, Tray, nativeImage, net, shell } = require('electron');
+const { app, clipboard, Menu, Tray, nativeImage, net, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -130,6 +130,9 @@ function updateMenu() {
       { label: menuText(nowPlaying), enabled: false },
       ...(needsPermission
         ? [{ label: `Allow Access to ${PLAYER_NAME}…`, click: () => shell.openExternal(AUTOMATION_SETTINGS_URL) }]
+        : []),
+      ...(status.details
+        ? [{ label: 'Copy Error Details', click: () => clipboard.writeText(status.details) }]
         : []),
       { label: discordText, enabled: false },
       { type: 'separator' },

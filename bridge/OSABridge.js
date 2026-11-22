@@ -1,6 +1,8 @@
 // JavaScript for Automation (JXA) script that reports what the macOS Music
 // app is playing as a single line of JSON.
 // Run with: osascript -l JavaScript OSABridge.js
+// (The app passes this file's text to osascript with -e rather than its path,
+// so it works wherever macOS runs the app from.)
 
 function getPlayerState(music) {
   switch (music.playerState()) {
@@ -41,10 +43,8 @@ function getStatus() {
   return status;
 }
 
-function run() {
-  // Escape non-ASCII characters so song titles in any language survive
-  // osascript's output encoding.
-  return JSON.stringify(getStatus()).replace(/[\u007f-￿]/g, function (c) {
-    return "\\u" + ("0000" + c.charCodeAt(0).toString(16)).slice(-4);
-  });
-}
+// osascript prints the value of the last expression. Non-ASCII characters are
+// escaped so song titles in any language survive osascript's output encoding.
+JSON.stringify(getStatus()).replace(/[\u007f-\uffff]/g, function (c) {
+  return "\\u" + ("0000" + c.charCodeAt(0).toString(16)).slice(-4);
+});
