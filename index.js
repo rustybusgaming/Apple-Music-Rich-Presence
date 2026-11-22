@@ -5,7 +5,7 @@ const path = require('path');
 const { getPlayerStatus } = require('./bridge/iTunesBridge');
 const DiscordIPC = require('./lib/discord-ipc');
 const { buildActivity, keepTimestamps, parseTrack } = require('./lib/presence');
-const { lookupArtwork } = require('./lib/artwork');
+const { lookupArtwork, lookupAppLogo } = require('./lib/artwork');
 
 const DISCORD_CLIENT_ID = '861702238472241162';
 const POLL_INTERVAL_MS = 1000; // while a song is playing or paused
@@ -50,16 +50,17 @@ function changeSetting(key, value) {
 // ---------------------------------------------------------------- presence
 
 async function updatePresence() {
-  const active = status.state === 'Playing' || status.state === 'Paused';
-  const artwork =
-    active && settings.enabled && settings.showArtwork
-      ? await lookupArtwork(parseTrack(status), {
-          country: (app.getLocaleCountryCode() || 'us').toLowerCase(),
-          fetchImpl: (...args) => net.fetch(...args),
-        })
-      : null;
+  const show = settings.enabled && (status.state === 'Playing' || status.state === 'Paused');
+  const lookup = {
+    country: (app.getLocaleCountryCode() || 'us').toLowerCase(),
+    fetchImpl: (...args) => net.fetch(...args),
+  };
+  const [artwork, logo] = await Promise.all([
+    show && settings.showArtwork ? lookupArtwork(parseTrack(status), lookup) : null,
+    show ? lookupAppLogo(lookup) : null,
+  ]);
 
-  const next = settings.enabled ? buildActivity(status, settings, artwork) : null;
+  const next = settings.enabled ? buildActivity(status, { ...settings, logo }, artwork) : null;
   activity = keepTimestamps(next, activity);
   discord.setActivity(activity); // only sent to Discord when something changed
 }
@@ -151,11 +152,10 @@ function updateMenu() {
 }
 
 function createTray() {
-  const source = nativeImage.createFromPath(path.join(__dirname, 'icons', 'applemusic_64_64.png'));
-  const icon = source.resize({ width: 16, height: 16 });
-  icon.addRepresentation({ scaleFactor: 2, buffer: source.resize({ width: 32, height: 32 }).toPNG() });
-
-  tray = new Tray(icon);
+  // On macOS, "Template" images are recolored to suit light and dark menu
+  // bars. Electron loads the @2x versions for high-DPI screens automatically.
+  const file = process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png';
+  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icons', file)));
   // Windows only opens the menu on right-click by default.
   if (process.platform === 'win32') tray.on('click', () => tray.popUpContextMenu());
   updateMenu();

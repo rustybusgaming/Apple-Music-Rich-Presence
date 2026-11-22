@@ -1,3 +1,5 @@
+<img src="icons/applemusic.png" alt="Apple Music logo" width="96">
+
 # **Apple Music Discord Rich Presence**
 
 ## **Contents**
@@ -5,6 +7,7 @@
 2. App Features
 3. App Installation
 4. Running From Source
+5. Making a Release
 
 ## **Project Overview**
 
@@ -22,8 +25,9 @@ This app bridges [Discord](https://discord.com) and [Apple Music](https://www.ap
   * A progress bar with elapsed and total time (you can turn it off)
 
 ### **2. Album Artwork**
-  * Shows the song's real album cover instead of the Apple Music logo
+  * Shows the song's real album cover
   * Looked up once per song with Apple's public iTunes Search API. You can turn this off from the menu.
+  * Without artwork, it shows Apple's current Apple Music logo, fetched live from the App Store so it stays up to date when Apple redesigns it
 
 ### **3. Paused Status**
   * Shows that the song is paused, with no timer running
@@ -46,28 +50,29 @@ This app bridges [Discord](https://discord.com) and [Apple Music](https://www.ap
 
 ## **App Installation**
 
+Download the latest version from [releases](https://github.com/rustybusgaming/Apple-Music-Rich-Presence/releases/latest). Under "Assets", pick the file for your computer:
+
+| Computer | File |
+| --- | --- |
+| Mac (Intel or Apple Silicon) | `AppleMusicRPC-darwin-universal.zip` |
+| Windows PC | `AppleMusicRPC-win32-x64.zip` |
+| Windows on ARM (e.g. Snapdragon laptops) | `AppleMusicRPC-win32-arm64.zip` |
+
 * ###  macOS 12+
 
-  1. Go to [releases](https://github.com/rohilpatel1/Apple-Music-Rich-Presence/releases) and choose a version. The most recent version is highly recommended.
+  1. Open the zip from your **Downloads** folder and drag **AppleMusicRPC** into your **Applications** folder.
 
-  2. Under "Assets" at the bottom of the release, download the file for your operating system (e.g. `darwin-universal.zip` for **macOS**).
+  2. Open the app. The app isn't notarized by Apple, so macOS warns that it can't verify it. Click **Done**, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only need to do this once.
 
-  3. Open the file from your **Downloads** folder, unzipping it if needed.
-
-  4. Drag the "AppleMusicRPC" app into your **Applications** folder.
-
-  5. Open the app. If you get an "Unidentified Developer" error, right-click the app in Applications and choose "Open".
-
-  6. The first time it runs, macOS asks whether AppleMusicRPC can control Music. Click **OK**. The app then appears in your menu bar.
+  3. When macOS asks whether AppleMusicRPC can control Music, click **OK**. The app's icon then appears in your menu bar.
 
 * ### Windows 10 / 11
-  1. Go to [releases](https://github.com/rohilpatel1/Apple-Music-Rich-Presence/releases) and choose a version. The most recent version is highly recommended.
 
-  2. Under "Assets" at the bottom of the release, download the file for your operating system (e.g. `win32-x64.zip` for 64-bit **Windows**).
+  1. Unzip the file and open the folder inside.
 
-  3. Open the file from your **Downloads** folder, unzipping it if needed.
+  2. Run **AppleMusicRPC.exe**. If Windows SmartScreen warns about an unrecognized app, click **More info → Run anyway**.
 
-  4. Open the folder and run "AppleMusicRPC.exe". The app appears in the system tray, and your status shows up once iTunes is playing.
+  3. The app appears in the system tray (you may need to click the **^** arrow to see it), and your status shows up once iTunes is playing.
 
 ## **Running From Source**
 
@@ -77,5 +82,20 @@ You'll need [Node.js](https://nodejs.org) 22.12 or newer.
 npm install
 npm start        # run the app
 npm test         # run the tests
-npm run build    # package for Windows (x64 and ia32) and macOS (universal) into dist/
+npm run build    # package for Windows (x64 and arm64) and macOS (universal) into dist/
 ```
+
+To refresh the icons with Apple's latest Apple Music logo (needs Python and Pillow):
+
+```bash
+python scripts/update_logo.py
+```
+
+## **Making a Release**
+
+A GitHub Action (`.github/workflows/release.yml`) builds the app for macOS and Windows on every push. It downloads Apple's latest Apple Music logo first, so every build uses the current icon. To publish a release:
+
+1. Go to the repository's **Actions** tab → **Build and release** → **Run workflow**.
+2. Enter a version number like `1.2.0` and click **Run workflow**.
+
+The action creates the `v1.2.0` tag and a release with notes and the three zips attached. Pushing a tag like `v1.2.0` does the same.

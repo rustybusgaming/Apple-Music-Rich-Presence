@@ -1,0 +1,172 @@
+# Builds the app for macOS and Windows on every push.
+#
+# To publish a release, either:
+#   - go to Actions → "Build and release" → "Run workflow" and enter a version
+#     like 1.2.0, or
+#   - push a tag like v1.2.0.
+# The release gets the version as its tag, auto-generated notes, and the zips.
+
+name: Build and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, like 1.2.0 (creates the tag v1.2.0)
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # The build only needs Electron for the target platform, which the packager
+  # downloads itself.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+jobs:
+  prepare:
+    name: Test and fetch the logo
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Work out the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            version="${INPUT_VERSION#v}"
+            release=true
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+            release=true
+          else
+            version="$(node -p 'require("./package.json").version')"
+            release=false
+          fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::\"$version\" isn't a version number like 1.2.0"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Fetch the latest Apple Music logo
+        run: |
+          pip install pillow
+          python scripts/update_logo.py || echo "::warning::Couldn't fetch the logo, so the build uses the icons in the repository."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icons
+          path: icons/
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-universal
+            os: macos-latest
+            script: pack:mac
+          - target: win32-x64
+            os: windows-latest
+            script: pack:win64
+          - target: win32-arm64
+            os: windows-latest
+            script: pack:win-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the freshly fetched logo
+        uses: actions/download-artifact@v4
+        with:
+          name: icons
+          path: icons
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Set the app version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: npm pkg set version="$VERSION"
+
+      - run: npm run ${{ matrix.script }}
+
+      # Apple Silicon Macs refuse to run unsigned apps. An ad hoc signature
+      # is free; users still have to approve the app once (see the README).
+      - name: Sign the app (ad hoc)
+        if: runner.os == 'macOS'
+        run: codesign --force --deep --sign - dist/AppleMusicRPC-darwin-universal/AppleMusicRPC.app
+
+      - name: Zip
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            ditto -c -k --sequesterRsrc --keepParent "dist/AppleMusicRPC-$TARGET/AppleMusicRPC.app" "AppleMusicRPC-$TARGET.zip"
+          else
+            7z a "AppleMusicRPC-$TARGET.zip" "./dist/AppleMusicRPC-$TARGET"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AppleMusicRPC-${{ matrix.target }}
+          path: AppleMusicRPC-${{ matrix.target }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: AppleMusicRPC-*
+          path: release
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: v${{ needs.prepare.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release/*.zip

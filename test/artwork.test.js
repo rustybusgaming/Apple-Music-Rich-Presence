@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { lookupArtwork, pickBest } = require('../lib/artwork');
+const { lookupArtwork, lookupAppLogo, pickBest } = require('../lib/artwork');
 
 const results = [
   {
@@ -63,4 +63,25 @@ test('lookupArtwork gives up quietly on network errors', async () => {
     throw new Error('offline');
   };
   assert.equal(await lookupArtwork({ name: 'Offline Song', artist: 'X' }, { fetchImpl }), null);
+});
+
+test("lookupAppLogo returns Apple's current Apple Music icon at 512px", async () => {
+  const calls = [];
+  const fetchImpl = fakeFetch(
+    { results: [{ artworkUrl512: 'https://is1-ssl.mzstatic.com/image/thumb/Purple/music.png/512x512bb.jpg' }] },
+    calls
+  );
+  const logo = await lookupAppLogo({ country: 'gb', fetchImpl });
+  assert.equal(logo, 'https://is1-ssl.mzstatic.com/image/thumb/Purple/music.png/512x512bb.jpg');
+  assert.equal(calls[0], 'https://itunes.apple.com/lookup?id=1108187390&country=gb');
+
+  await lookupAppLogo({ country: 'gb', fetchImpl });
+  assert.equal(calls.length, 1);
+});
+
+test('lookupAppLogo returns null when Apple is unreachable', async () => {
+  const fetchImpl = async () => {
+    throw new Error('offline');
+  };
+  assert.equal(await lookupAppLogo({ country: 'fr', fetchImpl }), null);
 });

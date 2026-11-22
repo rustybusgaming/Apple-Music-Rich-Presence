@@ -87,3 +87,9 @@ test('keepTimestamps ignores small drift but notices seeks and song changes', ()
 
   assert.equal(keepTimestamps(null, first), null);
 });
+
+test("Apple's current logo is shown when there's no album artwork", () => {
+  const logo = 'https://is1-ssl.mzstatic.com/image/thumb/logo.png/512x512bb.jpg';
+  assert.equal(buildActivity(song, { logo }, null, NOW).assets.large_image, logo);
+  assert.equal(buildActivity(song, { logo }, { imageUrl: 'https://example.com/a.jpg' }, NOW).assets.large_image, 'https://example.com/a.jpg');
+});
