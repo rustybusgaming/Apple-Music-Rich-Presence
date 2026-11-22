@@ -52,9 +52,9 @@ Download the latest version from [releases](https://github.com/rustybusgaming/Ap
 
 | Computer | File |
 | --- | --- |
-| Mac (Intel or Apple Silicon) | `AppleMusicRPC-darwin-universal.zip` |
-| Windows PC | `AppleMusicRPC-win32-x64.zip` |
-| Windows on ARM (e.g. Snapdragon laptops) | `AppleMusicRPC-win32-arm64.zip` |
+| Mac (Intel or Apple Silicon) | `AppleMusicRPC-Mac.zip` |
+| Windows PC (64-bit) | `AppleMusicRPC-Windows-64bit.zip` |
+| Windows on ARM (e.g. Snapdragon laptops) | `AppleMusicRPC-Windows-ARM.zip` |
 
 * ###  macOS 12+
 
@@ -66,7 +66,7 @@ Download the latest version from [releases](https://github.com/rustybusgaming/Ap
 
 * ### Windows 10 / 11
 
-  1. Unzip the file and open the folder inside.
+  1. Unzip the file and open the **AppleMusicRPC** folder inside.
 
   2. Run **AppleMusicRPC.exe**. If Windows SmartScreen warns about an unrecognized app, click **More info → Run anyway**.
 
