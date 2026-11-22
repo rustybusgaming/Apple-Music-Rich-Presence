@@ -1,5 +1,6 @@
 const { app, clipboard, Menu, Tray, nativeImage, net, shell } = require('electron');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { PlayerWatcher, PLAYER_NAME } = require('./bridge/player');
@@ -8,8 +9,16 @@ const { buildActivity, keepTimestamps, parseTrack } = require('./lib/presence');
 const { lookupArtwork, lookupAppLogo, lookupAnimatedCovers, findAnimatedCover } = require('./lib/artwork');
 
 const DISCORD_CLIENT_ID = '861702238472241162';
-const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true, showAnimated: true };
+const DEFAULT_SETTINGS = { enabled: true, showProgress: true, showArtwork: true, showAnimated: true, includeBrowsers: false };
 const AUTOMATION_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Automation';
+const IS_LINUX = process.platform === 'linux' || process.platform === 'freebsd';
+
+// This app shows no web pages, so Chromium's sandbox isn't needed. On Linux it
+// can stop the app from starting at all (newer Ubuntu releases restrict what it
+// relies on). That check happens before this code runs, so the Linux download
+// starts the app through a launcher script that passes --no-sandbox; this line
+// keeps the sandbox off for the app's helper processes too.
+if (IS_LINUX) app.commandLine.appendSwitch('no-sandbox');
 
 let tray = null;
 let discord = null;
@@ -41,8 +50,45 @@ function changeSetting(key, value) {
   } catch (error) {
     console.warn('Could not save settings:', error.message);
   }
+  if (key === 'includeBrowsers') watcher?.setEnv(watcherEnv());
   updateMenu();
   updatePresence();
+}
+
+// Settings the player script reads.
+function watcherEnv() {
+  return { AMRPC_INCLUDE_BROWSERS: settings.includeBrowsers ? '1' : '0' };
+}
+
+// ------------------------------------------------------------ open at login
+
+// Electron handles this on macOS and Windows. Linux desktops start the apps
+// listed in ~/.config/autostart instead.
+function autostartFile() {
+  const config = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(config, 'autostart', 'apple-music-rich-presence.desktop');
+}
+
+function getOpenAtLogin() {
+  return IS_LINUX ? fs.existsSync(autostartFile()) : app.getLoginItemSettings().openAtLogin;
+}
+
+function setOpenAtLogin(enabled) {
+  if (!IS_LINUX) return app.setLoginItemSettings({ openAtLogin: enabled });
+  try {
+    if (!enabled) return fs.rmSync(autostartFile(), { force: true });
+    // An AppImage sets APPIMAGE to its own path; otherwise run this binary
+    // (when running from source, that's Electron, so add the app's folder).
+    const program = process.env.APPIMAGE || process.execPath;
+    const exec = app.isPackaged ? `"${program}" --no-sandbox` : `"${program}" --no-sandbox "${app.getAppPath()}"`;
+    fs.mkdirSync(path.dirname(autostartFile()), { recursive: true });
+    fs.writeFileSync(
+      autostartFile(),
+      `[Desktop Entry]\nType=Application\nName=Apple Music Rich Presence\nExec=${exec}\nX-GNOME-Autostart-enabled=true\n`
+    );
+  } catch (error) {
+    console.warn('Could not change Open at Login:', error.message);
+  }
 }
 
 // ---------------------------------------------------------------- presence
@@ -111,13 +157,15 @@ function nowPlayingText() {
     case 'Starting':
       return 'Starting…';
     case 'Not Running':
-      return process.platform === 'win32' ? "Apple Music and iTunes aren't open" : "Music isn't open";
+      if (process.platform === 'win32') return "Apple Music and iTunes aren't open";
+      if (IS_LINUX) return settings.includeBrowsers ? 'Nothing playing' : 'No Apple Music player open';
+      return "Music isn't open";
     case 'Error': {
       const player = status.player || PLAYER_NAME;
       return status.permission ? `Not allowed to read ${player}` : `Couldn't read ${player}: ${status.error}`;
     }
     case 'Unsupported':
-      return 'Only macOS and Windows are supported';
+      return 'Only macOS, Windows and Linux are supported';
     default:
       return 'Nothing playing';
   }
@@ -174,11 +222,27 @@ function updateMenu() {
         enabled: settings.showArtwork,
         click: (item) => changeSetting('showAnimated', item.checked),
       },
+      // Browsers report every site the same way, so the app can't tell an
+      // Apple Music tab from, say, YouTube: let people opt in.
+      ...(IS_LINUX
+        ? [
+            {
+              label: 'Include Web Browsers',
+              type: 'checkbox',
+              checked: settings.includeBrowsers,
+              click: (item) => changeSetting('includeBrowsers', item.checked),
+            },
+          ]
+        : []),
       {
         label: 'Open at Login',
         type: 'checkbox',
-        checked: app.getLoginItemSettings().openAtLogin,
-        click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
+        checked: getOpenAtLogin(),
+        click: (item) => {
+          setOpenAtLogin(item.checked);
+          menuKey = ''; // show the real state, in case it couldn't be changed
+          updateMenu();
+        },
       },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
@@ -211,7 +275,7 @@ function start() {
 
   createTray();
 
-  watcher = new PlayerWatcher();
+  watcher = new PlayerWatcher({ env: watcherEnv() });
   watcher.on('status', onPlayerStatus);
   watcher.start();
 }
