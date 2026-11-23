@@ -103,7 +103,7 @@ test('a slow lookup returns straight away, then calls onLate when it finishes', 
 // A fake iTunes Search API: `answer(params)` returns the results for a search.
 function fakeSearch(answer, calls = []) {
   return async (url) => {
-    const params = Object.fromEntries(new URL(url).searchParams);
+    const params = { path: new URL(url).pathname, ...Object.fromEntries(new URL(url).searchParams) };
     calls.push(params);
     return { ok: true, json: async () => ({ results: answer(params) }) };
   };
@@ -150,6 +150,191 @@ test("tries the US store when the computer's country has no match", async () => 
   assert.deepEqual([...new Set(calls.map((c) => c.country))], ['jp', 'us']);
 });
 
+// Apple's search leaves out explicit albums with no clean version, like IGOR.
+const tyler = { wrapperType: 'artist', artistName: 'Tyler, The Creator', artistId: 420368335 };
+const igor = {
+  wrapperType: 'collection',
+  artistName: 'Tyler, The Creator',
+  artistId: 420368335,
+  collectionName: 'IGOR',
+  collectionId: 1463409338,
+  collectionExplicitness: 'explicit',
+  artworkUrl100: 'https://is1.mzstatic.com/igor/100x100bb.jpg',
+};
+const earfquake = { ...igor, wrapperType: 'track', trackName: 'EARFQUAKE' };
+const chromakopia = { ...igor, collectionName: 'CHROMAKOPIA', collectionId: 1789446415, collectionExplicitness: 'cleaned' };
+
+test("looks through the artist's songs when Apple's search leaves the album out", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return params.entity === 'song' ? [tyler, earfquake] : [];
+    return params.entity === 'album' ? [chromakopia] : [];
+  }, calls);
+  const artwork = await lookupArtwork({ name: 'EARFQUAKE', artist: 'Tyler, The Creator', album: 'IGOR' }, { fetchImpl });
+  assert.equal(artwork.imageUrl, 'https://is1.mzstatic.com/igor/512x512bb.jpg');
+  assert.equal(artwork.albumId, '1463409338');
+  // The artist's ID came with the album search, so no artist search is needed.
+  assert.deepEqual(
+    calls.map((c) => [c.path, c.entity, c.id]),
+    [
+      ['/search', 'song', undefined],
+      ['/search', 'album', undefined],
+      ['/lookup', 'song', '420368335'],
+    ]
+  );
+});
+
+test("finds the artist, then looks through their albums, for a song that isn't among their most popular", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch((params) => {
+    if (params.entity === 'musicArtist') return [{ ...tyler, artistName: 'Tyler Childers', artistId: 1 }, tyler];
+    if (params.path === '/lookup') return params.entity === 'album' ? [tyler, chromakopia, igor] : [tyler];
+    return [];
+  }, calls);
+  const track = { name: 'GONE, GONE / THANK YOU', artist: 'Tyler, The Creator', album: 'IGOR' };
+  const artwork = await lookupArtwork(track, { country: 'ca', fetchImpl });
+  assert.equal(artwork.albumId, '1463409338');
+  assert.deepEqual(
+    calls.map((c) => [c.path, c.entity]),
+    [
+      ['/search', 'song'],
+      ['/search', 'album'],
+      ['/search', 'musicArtist'],
+      ['/lookup', 'song'],
+      ['/lookup', 'album'],
+    ]
+  );
+});
+
+test("another song by the same artist reuses the artist's lists", async () => {
+  const calls = [];
+  const deathGrips = { wrapperType: 'artist', artistName: 'Death Grips', artistId: 437819641 };
+  const song = (trackName, collectionName, collectionId) => ({
+    wrapperType: 'track',
+    artistName: 'Death Grips',
+    artistId: 437819641,
+    trackName,
+    collectionName,
+    collectionId,
+    artworkUrl100: `https://is1.mzstatic.com/${collectionId}/100x100bb.jpg`,
+  });
+  const fetchImpl = fakeSearch((params) => {
+    if (params.entity === 'musicArtist') return [deathGrips];
+    if (params.path === '/lookup' && params.entity === 'song') {
+      return [deathGrips, song('Get Got', 'The Money Store', 515449028), song('Hahaha', 'Year of the Snitch', 1371264010)];
+    }
+    return [];
+  }, calls);
+  const options = { country: 'au', fetchImpl };
+  assert.equal((await lookupArtwork({ name: 'Get Got', artist: 'Death Grips', album: 'The Money Store' }, options)).albumId, '515449028');
+  const before = calls.length;
+  assert.equal((await lookupArtwork({ name: 'Hahaha', artist: 'Death Grips', album: 'Year of the Snitch' }, options)).albumId, '1371264010');
+  // Only the song and album searches: the artist and their songs are known.
+  assert.deepEqual(
+    calls.slice(before).map((c) => [c.path, c.entity]),
+    [
+      ['/search', 'song'],
+      ['/search', 'album'],
+    ]
+  );
+});
+
+test("a collaboration is looked up under its first artist", async () => {
+  const calls = [];
+  const dave = { wrapperType: 'artist', artistName: 'Dave', artistId: 1 };
+  const sprinter = {
+    wrapperType: 'track',
+    artistName: 'Dave & Central Cee',
+    trackName: 'Sprinter',
+    collectionName: 'Sprinter - Single',
+    collectionId: 1689467155,
+    artworkUrl100: 'https://is1.mzstatic.com/sprinter/100x100bb.jpg',
+  };
+  const fetchImpl = fakeSearch((params) => {
+    if (params.entity === 'musicArtist') return params.term === 'Dave' ? [dave] : [];
+    if (params.path === '/lookup') return params.id === '1' && params.entity === 'song' ? [dave, sprinter] : [];
+    return [];
+  }, calls);
+  const artwork = await lookupArtwork({ name: 'Sprinter', artist: 'Dave & Central Cee', album: 'Sprinter - Single' }, { fetchImpl });
+  assert.equal(artwork.albumId, '1689467155');
+  assert.deepEqual(
+    calls.filter((c) => c.entity === 'musicArtist').map((c) => c.term),
+    ['Dave & Central Cee', 'Dave']
+  );
+});
+
+// "Do It" by underscores is on the album U, which Apple's search hides; in
+// some countries the search only has it on someone else's compilation.
+const underscores = { wrapperType: 'artist', artistName: 'underscores', artistId: 1204838812 };
+const onAlbum = (trackName, collectionName, collectionId, extra = {}) => ({
+  wrapperType: 'track',
+  artistName: 'underscores',
+  artistId: 1204838812,
+  trackName,
+  collectionName,
+  collectionId,
+  artworkUrl100: `https://is1.mzstatic.com/${collectionId}/100x100bb.jpg`,
+  ...extra,
+});
+const compilation = onAlbum('Do It', 'HEY! GEN Z', 111, { collectionArtistName: 'Various Artists' });
+const single = onAlbum('Music', 'Music - Single', 222);
+const doIt = { name: 'Do It', artist: 'underscores', album: 'U' };
+
+test("finds the song's own album rather than a compilation it's also on", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return params.entity === 'song' ? [underscores, onAlbum('Do It', 'U', 1878382378)] : [];
+    // "Music - Single" shouldn't count as the album "U" either.
+    return params.entity === 'song' ? [compilation, single] : [];
+  }, calls);
+  const artwork = await lookupArtwork(doIt, { country: 'gb', fetchImpl });
+  assert.equal(artwork.album, 'U');
+  assert.equal(artwork.albumId, '1878382378');
+});
+
+test("prefers the exact album and song over a \"(Director's Cut)\" or \"(Remix)\"", () => {
+  const track = { name: 'Johnny johnny johnny', artist: 'underscores', album: 'Wallsocket' };
+  const directorsCut = onAlbum('Johnny johnny johnny', "Wallsocket (Director's Cut)", 1752550191);
+  const original = onAlbum('Johnny johnny johnny', 'Wallsocket', 1693478262);
+  assert.equal(pickBest([directorsCut, original], track).collectionId, 1693478262);
+  const remix = onAlbum('Johnny johnny johnny (Remix)', 'Wallsocket', 1);
+  assert.equal(pickBest([remix, original], track).collectionId, 1693478262);
+});
+
+test('a different artist whose name contains this one is someone else', async () => {
+  // TMS Underscores, a production music library, has its own "Do It".
+  const tms = { ...onAlbum('Do It', 'Hey! Gen Z', 333), artistName: 'TMS Underscores', artistId: 1570870575 };
+  const fetchImpl = fakeSearch((params) => {
+    if (params.entity === 'musicArtist') return [{ ...tms, wrapperType: 'artist' }, underscores];
+    if (params.path === '/lookup') return [underscores];
+    return params.entity === 'song' ? [tms] : [];
+  });
+  assert.equal(await lookupArtwork(doIt, { country: 'es', fetchImpl }), null);
+  // Collaborations still count as the artist.
+  assert.equal(pickBest([{ ...tms, artistName: 'underscores & umru' }], doIt).artistName, 'underscores & umru');
+  assert.equal(pickBest([{ ...tms, artistName: 'Kendrick Lamar & SZA' }], { name: 'Do It', artist: 'Kendrick Lamar' }).collectionId, 333);
+  assert.equal(pickBest([tms], doIt), null);
+});
+
+test("uses the artist's own single when the song's album isn't anywhere", async () => {
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return [underscores];
+    return params.entity === 'song' ? [compilation, onAlbum('Do It', 'Do It - Single', 1846415812)] : [];
+  });
+  assert.equal((await lookupArtwork(doIt, { country: 'ie', fetchImpl })).albumId, '1846415812');
+});
+
+test("never uses someone else's compilation for a song from another album", async () => {
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return [underscores];
+    return params.entity === 'song' ? [compilation] : [];
+  });
+  assert.equal(await lookupArtwork(doIt, { country: 'fr', fetchImpl }), null);
+  // But it's the right cover when the song is playing from that compilation.
+  const fromCompilation = { ...doIt, album: 'HEY! GEN Z' };
+  assert.equal((await lookupArtwork(fromCompilation, { country: 'fr', fetchImpl })).albumId, '111');
+});
+
 test('a failed lookup is retried during the song, waiting longer each time', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   let online = false;
@@ -193,7 +378,11 @@ test('a song with no match is looked up again an hour later', async (t) => {
   assert.equal(calls.length, searches);
   t.mock.timers.tick(61 * 60 * 1000);
   await lookupArtwork(track, { fetchImpl });
-  assert.equal(calls.length, searches * 2);
+  // The song and album are searched for again; the artist search is kept.
+  assert.deepEqual(
+    calls.slice(searches).map((c) => c.entity),
+    ['song', 'album']
+  );
 });
 
 const coverList = {

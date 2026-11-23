@@ -37,13 +37,13 @@ This app bridges [Discord](https://discord.com) and [Apple Music](https://www.ap
   * See what's playing and whether Discord is connected
   * Turn the status, progress bar, artwork or animated covers on and off
   * Open the app automatically at login
-  * See which version you have and **Check for Updates**
+  * See which version you have and **Check for Updates**, or let it update itself
   * Quit the app
 
 ### **Good to know**
   * Works with the **Music** app on macOS, with the **Apple Music** app (from the Microsoft Store) or **iTunes** on Windows, and on Linux with Apple Music players such as [Cider](https://cider.sh) or, if you turn it on, Apple Music in a web browser.
   * Your status updates the moment a song changes, plays or pauses, and the app uses almost no CPU in between.
-  * **Updates**: once a day the app checks GitHub for a new version. When there is one, an **Update Available** item appears at the top of the menu, and you get one notification about it. Updating is up to you: the item opens the download page.
+  * **Updates install themselves**: once a day the app checks GitHub for a new version. When there is one, it downloads it, checks it isn't damaged, swaps it in and starts again, then tells you it's updated. Turn off **Install Updates Automatically** in the menu to choose when: an **Install Update** item then appears at the top of the menu instead. If the app can't update itself (say, it's in a folder you can't change), the item opens the download page.
   * Starting it before Discord is fine. It connects once Discord opens and reconnects if Discord restarts.
   * It never opens Music, Apple Music or iTunes by itself. Quitting the player clears your status.
   * Internet radio streams show the song that's playing, not just the station name.
@@ -67,6 +67,8 @@ Download the latest version from [releases](https://github.com/rustybusgaming/Ap
   2. Open the app. The app isn't notarized by Apple, so macOS warns that it can't verify it. Click **Done**, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only need to do this once.
 
   3. When macOS asks whether AppleMusicRPC can control Music, click **OK**. The app's icon then appears in your menu bar.
+
+  Keep the app in **Applications**: it can't update itself while it runs from **Downloads**. After an update, macOS may ask again whether it can control Music, since the app isn't signed with an Apple developer certificate; click **OK** again.
 
 * ### Windows 10 / 11
 
