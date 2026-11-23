@@ -263,6 +263,78 @@ test("a collaboration is looked up under its first artist", async () => {
   );
 });
 
+// "Do It" by underscores is on the album U, which Apple's search hides; in
+// some countries the search only has it on someone else's compilation.
+const underscores = { wrapperType: 'artist', artistName: 'underscores', artistId: 1204838812 };
+const onAlbum = (trackName, collectionName, collectionId, extra = {}) => ({
+  wrapperType: 'track',
+  artistName: 'underscores',
+  artistId: 1204838812,
+  trackName,
+  collectionName,
+  collectionId,
+  artworkUrl100: `https://is1.mzstatic.com/${collectionId}/100x100bb.jpg`,
+  ...extra,
+});
+const compilation = onAlbum('Do It', 'HEY! GEN Z', 111, { collectionArtistName: 'Various Artists' });
+const single = onAlbum('Music', 'Music - Single', 222);
+const doIt = { name: 'Do It', artist: 'underscores', album: 'U' };
+
+test("finds the song's own album rather than a compilation it's also on", async () => {
+  const calls = [];
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return params.entity === 'song' ? [underscores, onAlbum('Do It', 'U', 1878382378)] : [];
+    // "Music - Single" shouldn't count as the album "U" either.
+    return params.entity === 'song' ? [compilation, single] : [];
+  }, calls);
+  const artwork = await lookupArtwork(doIt, { country: 'gb', fetchImpl });
+  assert.equal(artwork.album, 'U');
+  assert.equal(artwork.albumId, '1878382378');
+});
+
+test("prefers the exact album and song over a \"(Director's Cut)\" or \"(Remix)\"", () => {
+  const track = { name: 'Johnny johnny johnny', artist: 'underscores', album: 'Wallsocket' };
+  const directorsCut = onAlbum('Johnny johnny johnny', "Wallsocket (Director's Cut)", 1752550191);
+  const original = onAlbum('Johnny johnny johnny', 'Wallsocket', 1693478262);
+  assert.equal(pickBest([directorsCut, original], track).collectionId, 1693478262);
+  const remix = onAlbum('Johnny johnny johnny (Remix)', 'Wallsocket', 1);
+  assert.equal(pickBest([remix, original], track).collectionId, 1693478262);
+});
+
+test('a different artist whose name contains this one is someone else', async () => {
+  // TMS Underscores, a production music library, has its own "Do It".
+  const tms = { ...onAlbum('Do It', 'Hey! Gen Z', 333), artistName: 'TMS Underscores', artistId: 1570870575 };
+  const fetchImpl = fakeSearch((params) => {
+    if (params.entity === 'musicArtist') return [{ ...tms, wrapperType: 'artist' }, underscores];
+    if (params.path === '/lookup') return [underscores];
+    return params.entity === 'song' ? [tms] : [];
+  });
+  assert.equal(await lookupArtwork(doIt, { country: 'es', fetchImpl }), null);
+  // Collaborations still count as the artist.
+  assert.equal(pickBest([{ ...tms, artistName: 'underscores & umru' }], doIt).artistName, 'underscores & umru');
+  assert.equal(pickBest([{ ...tms, artistName: 'Kendrick Lamar & SZA' }], { name: 'Do It', artist: 'Kendrick Lamar' }).collectionId, 333);
+  assert.equal(pickBest([tms], doIt), null);
+});
+
+test("uses the artist's own single when the song's album isn't anywhere", async () => {
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return [underscores];
+    return params.entity === 'song' ? [compilation, onAlbum('Do It', 'Do It - Single', 1846415812)] : [];
+  });
+  assert.equal((await lookupArtwork(doIt, { country: 'ie', fetchImpl })).albumId, '1846415812');
+});
+
+test("never uses someone else's compilation for a song from another album", async () => {
+  const fetchImpl = fakeSearch((params) => {
+    if (params.path === '/lookup') return [underscores];
+    return params.entity === 'song' ? [compilation] : [];
+  });
+  assert.equal(await lookupArtwork(doIt, { country: 'fr', fetchImpl }), null);
+  // But it's the right cover when the song is playing from that compilation.
+  const fromCompilation = { ...doIt, album: 'HEY! GEN Z' };
+  assert.equal((await lookupArtwork(fromCompilation, { country: 'fr', fetchImpl })).albumId, '111');
+});
+
 test('a failed lookup is retried during the song, waiting longer each time', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   let online = false;
